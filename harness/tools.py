@@ -48,6 +48,9 @@ GUARDED_DIRS = (".agents", ".harness")
 _SECRET_NAME = re.compile(
     r"PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API_?KEY|PRIVATE_?KEY|WEBHOOK|"
     r"(^|_)(KEY|PAT|PASS|DSN)($|_)|_PWD$|^DATABASE_URL$", re.I)
+# GIT_CONFIG_KEY_<n> holds a config key's name, not a secret; dropping it while
+# keeping GIT_CONFIG_COUNT made every git command fail.
+_GIT_CONFIG_KEY = re.compile(r"^GIT_CONFIG_KEY_\d+$")
 _URL_WITH_PASSWORD = re.compile(r"://[^/\s:@]*:[^/\s@]+@")  # user may be empty: redis://:pw@host
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
 # Encoding labels decode() returns for files with a byte-order mark.
@@ -94,14 +97,25 @@ def _json_type_ok(value, expected: str | None) -> bool:
 def scrubbed_env(env: Mapping[str, str]) -> dict[str, str]:
     """The environment minus credentials. `echo $GITHUB_TOKEN` would otherwise
     print a secret into a transcript that is sent to the model provider."""
-    return {k: v for k, v in env.items() if not _SECRET_NAME.search(k) and not _URL_WITH_PASSWORD.search(v)}
+    return {k: v for k, v in env.items()
+            if (_GIT_CONFIG_KEY.match(k) or not _SECRET_NAME.search(k)) and not _URL_WITH_PASSWORD.search(v)}
 
 
 def command_env(env: Mapping[str, str]) -> dict[str, str]:
     """The environment a command runs with: no credentials, and Python children
     told to write UTF-8. Output is read as UTF-8, but on Windows Python writes the
     ANSI code page to a pipe: "é" arrived as U+FFFD and "✓" crashed the child."""
-    return {**scrubbed_env(env), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    out = {**scrubbed_env(env), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    # core.fsmonitor=false as well: a repository config that names a monitor
+    # program would otherwise run it on every git status, approved or not.
+    # Appended after any GIT_CONFIG_* entries the user already set.
+    try:
+        n = int(out.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        n = 0
+    out.update({"GIT_CONFIG_COUNT": str(n + 1), f"GIT_CONFIG_KEY_{n}": "core.fsmonitor",
+                f"GIT_CONFIG_VALUE_{n}": "false"})
+    return out
 
 
 def printable(text: str) -> str:
@@ -360,6 +374,8 @@ class Toolbox:
             args = json.loads(arguments or "{}")
         except json.JSONDecodeError as e:
             return f"error: arguments for {name} are not valid JSON ({e.msg}). Send one JSON object."
+        except (RecursionError, ValueError):  # nested 100,000 deep, or an oversized integer
+            return f"error: arguments for {name} could not be read. Send one flat JSON object."
         if not isinstance(args, dict):
             return f"error: arguments for {name} must be a JSON object"
         schema = tool.parameters
@@ -432,7 +448,22 @@ class Toolbox:
     def _ask(self, question: str) -> bool:
         return not self.read_only and self.approve(question)
 
+    def _refuse_windows_aliases(self, p: Path, parts: tuple[str, ...]) -> None:
+        """Windows names that mean another name, which every check below would miss:
+        a trailing dot or space is dropped (`.env.` is .env), and `name:stream`
+        opens a stream of `name` (`.env::$DATA` is .env's content,
+        `.agents::$INDEX_ALLOCATION/x` is .agents/x)."""
+        if os.name != "nt":
+            return
+        for part in parts:
+            if part != part.rstrip(". "):
+                raise ToolError(f"{self._show(p)}: a name ending in a dot or space is not allowed on Windows")
+            if ":" in part:
+                raise ToolError(f"{self._show(p)}: ':' in a name selects an NTFS stream; not allowed")
+
     def _check_read(self, p: Path) -> None:
+        if self._inside(p):
+            self._refuse_windows_aliases(p, p.relative_to(self.workspace).parts)
         inside = any(p == root or p.is_relative_to(root) for root in self.readable_roots)
         if not inside and not self._ask(f"read outside the workspace: {p}"):
             raise ToolError("reading a file outside the workspace was not approved")
@@ -445,11 +476,7 @@ class Toolbox:
         if not self._inside(p):
             raise ToolError(f"{p} is outside the workspace ({self.workspace}); writes are confined to it")
         rel = p.relative_to(self.workspace).parts
-        if os.name == "nt" and any(part != part.rstrip(". ") for part in rel):
-            # Windows drops a trailing dot or space when it creates a name, so
-            # `.env.` becomes .env and `.agents./x` lands in .agents, past every
-            # name check below, which would see the undotted name only after.
-            raise ToolError(f"{self._show(p)}: a name ending in a dot or space is not allowed on Windows")
+        self._refuse_windows_aliases(p, rel)
         top = rel[0].lower() if rel else ""
         blocked = next((part for part in rel if part.lower() in BLOCKED_DIRS), None)
         if blocked:  # at any depth: sub/.git/hooks runs code as surely as .git/hooks

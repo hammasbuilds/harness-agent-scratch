@@ -509,6 +509,12 @@ def test_wrong_shaped_json_is_an_llm_error(tmp_path, backend, body):
         backend(cfg(tmp_path, backend=kind), FakePost(body)).chat(HISTORY, TOOLS)
 
 
+@pytest.mark.parametrize("usage", [["x"], "lots", {"prompt_tokens_details": "n/a"}, None])
+def test_a_malformed_usage_field_does_not_throw_away_a_good_answer(tmp_path, usage):
+    post = FakePost({"choices": [{"message": {"content": "the answer"}}], "usage": usage})
+    assert OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, None).content == "the answer"
+
+
 def test_openai_content_as_typed_parts(tmp_path):
     post = FakePost({"choices": [{"message": {"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}}]})
     assert OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, None).content == "ab"

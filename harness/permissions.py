@@ -50,7 +50,10 @@ GIT_READ_ONLY = {"status", "log", "diff", "show", "rev-parse", "ls-files", "blam
 # long options are also matched by prefix, since it accepts `--outp` for
 # `--output`).
 UNSAFE_FLAGS = {
-    "find": {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"},
+    # -files0-from (GNU find 4.9+) takes its starting points from a file the
+    # model can write, which could list anything outside the workspace.
+    "find": {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls",
+             "-files0-from"},
     "git": {"--output", "--ext-diff", "--textconv", "--exec", "--upload-pack", "--open-files-in-pager", "-O"},
     # Read the names of the files to read from another file, which the model can
     # write without asking and fill with paths outside the workspace.
@@ -251,17 +254,22 @@ def _repo_is_workspace(workspace: Path) -> bool:
     return not any((parent / ".git").exists() for parent in workspace.parents)
 
 
-def _repo_config_is_plain(workspace: Path) -> bool:
-    """True only if every key in the repository's config is one a plain clone writes."""
+def repo_config_is_plain(workspace: Path) -> bool:
+    """True only for a real `.git` folder in the workspace whose config holds
+    nothing but the keys a plain clone writes.
+
+    No `.git` folder means False, not "nothing to check": the model can write
+    HEAD, objects/, refs/ and a config (worktree = ., fsmonitor = ./hook.sh) at
+    the workspace root, none of it guarded, and git then treats the root itself
+    as the repository and runs the hook on `git status`.
+    """
     git = workspace / ".git"
-    if git.is_file():
-        return False  # a gitdir pointer: the real config lives elsewhere
-    if (git / "config.worktree").exists():
-        return False  # read when extensions.worktreeConfig is set
+    if not git.is_dir() or git.is_symlink():
+        return False  # missing, a gitdir pointer file, or a link elsewhere
+    if (git / "commondir").exists() or (git / "config.worktree").exists():
+        return False  # the config actually used lives elsewhere, or in a second file
     try:
         text = (git / "config").read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return True
     except OSError:
         return False
     section = None
@@ -290,7 +298,7 @@ def _git_ok(args: list[str], workspace: Path | None) -> bool:
         return False  # pathspec magic (:/) and object paths (HEAD:../x) reach past the workspace
     if any(_flag_matches(a, UNSAFE_FLAGS["git"]) for a in rest):
         return False
-    return workspace is None or (_repo_is_workspace(workspace) and _repo_config_is_plain(workspace))
+    return workspace is None or (_repo_is_workspace(workspace) and repo_config_is_plain(workspace))
 
 
 def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = False) -> str:

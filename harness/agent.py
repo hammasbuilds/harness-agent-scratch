@@ -241,8 +241,8 @@ class Agent:
             # compact_to is a share of the whole prompt, so the fixed overhead
             # comes out of it before deciding how much transcript to keep.
             keep_tokens=max(MIN_KEEP_TOKENS, int(self.cfg.compact_to * limit) - self.overhead_tokens()),
-            budget_chars=int(limit * 3 * 0.6),
-            max_summary_chars=int(limit * 3 * SUMMARY_SHARE),
+            budget_tokens=int(limit * 0.6),
+            max_summary_tokens=int(limit * SUMMARY_SHARE),
         )
         # Nothing droppable (one oversized message) leaves the transcript as it was.
         if len(self.messages) != count:

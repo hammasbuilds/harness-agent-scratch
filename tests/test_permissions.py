@@ -6,6 +6,12 @@ import pytest
 from harness.permissions import ALLOW, ASK, DENY, classify, is_secret_file
 
 
+def make_repo(ws: Path) -> None:
+    """A .git folder like the one `git init` writes, with a plain config."""
+    (ws / ".git").mkdir(exist_ok=True)
+    (ws / ".git" / "config").write_text("[core]\n\trepositoryformatversion = 0\n\tbare = false\n")
+
+
 @pytest.mark.parametrize("command", [
     "ls -la",
     "pwd",
@@ -21,6 +27,7 @@ from harness.permissions import ALLOW, ASK, DENY, classify, is_secret_file
 def test_read_only_commands_run_at_once(command, tmp_path):
     # A workspace is needed: without one, recursive reads cannot be checked and ask.
     (tmp_path / "harness").mkdir()
+    make_repo(tmp_path)
     assert classify(command, tmp_path.resolve()) == ALLOW
 
 
@@ -104,6 +111,7 @@ def test_paths_outside_the_workspace_ask(tmp_path):
 def test_paths_inside_the_workspace_still_run(tmp_path):
     ws = (tmp_path / "ws").resolve()
     (ws / "sub").mkdir(parents=True)
+    make_repo(ws)
     for command in ["cat sub/a.txt", "ls sub/..", f"cat {(ws / 'a.txt').as_posix()}", "grep -rn TODO .",
                     "ls missing 2>/dev/null", "cat -", "git log -5"]:
         assert classify(command, ws) == ALLOW, command
@@ -238,6 +246,33 @@ def test_a_worktree_config_file_makes_git_ask(tmp_path):
     assert classify("git status", ws) == ASK
 
 
+def _plant_bare_repo_at_root(ws: Path) -> None:
+    """What the model could write with write_file alone: the root becomes a repo."""
+    (ws / "HEAD").write_text("ref: refs/heads/main\n")
+    (ws / "objects").mkdir()
+    (ws / "refs" / "heads").mkdir(parents=True)
+    (ws / "config").write_text("[core]\n\tworktree = .\n\tfsmonitor = ./hook.sh\n")
+
+
+def test_git_needs_a_real_dot_git_folder_not_a_planted_root(tmp_path):
+    ws = tmp_path.resolve()
+    _plant_bare_repo_at_root(ws)
+    assert classify("git status", ws) == ASK  # was ALLOW, and git ran hook.sh
+
+
+@pytest.mark.parametrize("extra", ["commondir", "config.worktree"])
+def test_git_asks_when_its_config_may_come_from_elsewhere(tmp_path, extra):
+    ws = tmp_path.resolve()
+    (ws / ".git").mkdir()
+    (ws / ".git" / "config").write_text("[core]\n\tbare = false\n")
+    (ws / ".git" / extra).write_text("../../elsewhere\n")
+    assert classify("git log", ws) == ASK
+
+
+def test_find_reading_start_points_from_a_file_asks(box_ws):
+    assert classify("find -files0-from list.txt -name x", box_ws) == ASK
+
+
 def test_a_real_clone_config_passes(tmp_path):
     ws = tmp_path.resolve()
     (ws / ".git").mkdir()
@@ -261,6 +296,7 @@ def box_ws(tmp_path):
     (ws / "a.txt").write_text("a")
     (ws / "src" / "m.py").write_text("x")
     (tmp_path / "secret.txt").write_text("s")
+    make_repo(ws)
     return ws
 
 
@@ -322,7 +358,7 @@ def test_git_asks_when_the_repository_is_bigger_than_the_workspace(tmp_path):
     ws = (tmp_path / "sub").resolve()
     ws.mkdir()
     assert classify("git log", ws) == ASK  # its history and diffs cover files outside ws
-    (ws / ".git").mkdir()
+    make_repo(ws)
     assert classify("git log", ws) == ALLOW
 
 

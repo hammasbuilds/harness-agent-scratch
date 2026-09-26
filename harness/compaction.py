@@ -48,7 +48,7 @@ def choose_cut(messages: list[dict], keep_tokens: int) -> int:
     return users[-1] if users else 0
 
 
-def render_for_summary(messages: list[dict], budget_chars: int) -> str:
+def render_for_summary(messages: list[dict]) -> str:
     parts = []
     for m in messages:
         role = m["role"]
@@ -62,33 +62,56 @@ def render_for_summary(messages: list[dict], budget_chars: int) -> str:
             for tc in m.get("tool_calls") or []:
                 line += f"\n  -> called {tc['function']['name']} {tc['function']['arguments']}"
             parts.append(line)
-    text = "\n\n".join(parts)
-    if len(text) > budget_chars:
-        # Keep the opening (the goal) and the most recent work; drop the middle.
-        head = budget_chars // 4
-        text = text[:head] + "\n\n[... middle of transcript omitted ...]\n\n" + text[-(budget_chars - head):]
-    return text
+    return "\n\n".join(parts)
+
+
+def text_tokens(text: str) -> int:
+    return estimate_tokens([{"c": text}])
+
+
+def fit_tokens(text: str, max_tokens: int, head_share: float = 0.25,
+               marker: str = "\n\n[... middle omitted ...]\n\n") -> str:
+    """Cut `text` to about `max_tokens`, keeping its start and its end.
+
+    Measured in tokens, not characters: a character cap sized for English let a
+    Chinese handoff note fill 45% of the context and forced a compaction every turn.
+    """
+    if text_tokens(text) <= max_tokens:
+        return text
+    lo, hi = 0, len(text)  # the largest number of characters that fits
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        head = int(mid * head_share)
+        candidate = text[:head] + marker + text[len(text) - (mid - head):]
+        if text_tokens(candidate) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    head = int(lo * head_share)
+    return text[:head] + marker + text[len(text) - (lo - head):] if lo else marker.strip()
 
 
 def compact(messages: list[dict], previous_summary: str, llm: LLM, *, keep_tokens: int,
-            budget_chars: int, max_summary_chars: int = 4000) -> tuple[str, list[dict]]:
+            budget_tokens: int, max_summary_tokens: int = 1000) -> tuple[str, list[dict]]:
     """Return (new handoff note, messages to keep).
 
     The note is capped: it sits in every later request, and each compaction
     folds the previous note into the next, so an uncapped note would grow
-    until it alone filled the context.
+    until it alone filled the context. The transcript sent for summarising is
+    capped too, so the compaction request itself fits the context.
     """
     cut = choose_cut(messages, keep_tokens)
     if cut == 0:
         return previous_summary, messages
-    body = render_for_summary(messages[:cut], budget_chars)
+    # Keep the opening (the goal) and the most recent work; drop the middle.
+    body = fit_tokens(render_for_summary(messages[:cut]), budget_tokens)
     if previous_summary:
         body = f"Handoff note from an earlier compaction:\n{previous_summary}\n\nTranscript since then:\n{body}"
-    words = max(50, max_summary_chars // 7)
+    words = max(50, int(max_summary_tokens * 0.6))
     system = f"{COMPACT_SYSTEM}\nKeep the note under {words} words."
     note = llm.chat([{"role": "system", "content": system}, {"role": "user", "content": body}], None).content.strip()
     if not note:  # an empty summary would silently lose everything that was cut
         note = previous_summary + ("\n\n" if previous_summary else "") + f"[summary failed; earlier transcript excerpt]\n{body}"
-    if len(note) > max_summary_chars:
-        note = note[:max_summary_chars] + "\n[note cut to fit the context]"
+    if text_tokens(note) > max_summary_tokens:
+        note = fit_tokens(note, max_summary_tokens - 12, head_share=1.0, marker="\n[note cut to fit the context]")
     return note, messages[cut:]

@@ -1,4 +1,5 @@
-from harness.compaction import COMPACT_SYSTEM, choose_cut, compact, estimate_tokens, render_for_summary
+from harness.compaction import (COMPACT_SYSTEM, choose_cut, compact, estimate_tokens, fit_tokens,
+                                render_for_summary, text_tokens)
 from harness.llm import Reply, ScriptedLLM
 
 
@@ -52,7 +53,7 @@ def test_cut_zero_when_nothing_can_go():
 
 
 def test_render_includes_calls_and_trims_tool_output():
-    text = render_for_summary(turn(1, size=5000), budget_chars=100_000)
+    text = render_for_summary(turn(1, size=5000))
     assert "USER: task 1" in text
     assert '-> called bash {"command": "ls"}' in text
     assert "TOOL RESULT (bash):" in text and "[...]" in text
@@ -62,14 +63,15 @@ def test_render_includes_calls_and_trims_tool_output():
 def test_render_keeps_the_goal_and_the_end_when_over_budget():
     msgs = [{"role": "user", "content": "GOAL: build boids"}] + turn(1, 3000) + turn(2, 3000) + \
         [{"role": "assistant", "content": "LATEST STEP"}]
-    text = render_for_summary(msgs, budget_chars=1200)
+    text = fit_tokens(render_for_summary(msgs), 400)
     assert "GOAL: build boids" in text and "LATEST STEP" in text and "omitted" in text
+    assert text_tokens(text) <= 400
 
 
 def test_compact_summarises_the_dropped_part():
     msgs = turn(1) + turn(2) + turn(3)
     llm = ScriptedLLM([Reply("NOTE: tasks 1-2 done")])
-    summary, kept = compact(msgs, "", llm, keep_tokens=estimate_tokens(turn(3)) + 5, budget_chars=50_000)
+    summary, kept = compact(msgs, "", llm, keep_tokens=estimate_tokens(turn(3)) + 5, budget_tokens=20_000)
     assert summary == "NOTE: tasks 1-2 done"
     assert kept == turn(3)
     sent, tools = llm.requests[0]
@@ -81,26 +83,48 @@ def test_compact_summarises_the_dropped_part():
 def test_long_notes_are_capped_so_repeated_compactions_cannot_grow_without_bound():
     llm = ScriptedLLM([Reply("n" * 10_000)])
     note, _ = compact(turn(1) + turn(2), "", llm, keep_tokens=estimate_tokens(turn(2)) + 5,
-                      budget_chars=50_000, max_summary_chars=1000)
-    assert len(note) < 1100 and note.endswith("[note cut to fit the context]")
+                      budget_tokens=20_000, max_summary_tokens=300)
+    assert text_tokens(note) <= 300 and note.endswith("[note cut to fit the context]")
 
 
 def test_an_empty_note_keeps_an_excerpt_instead_of_losing_history():
     llm = ScriptedLLM([Reply("")])
     note, kept = compact(turn(1) + turn(2), "OLD", llm, keep_tokens=estimate_tokens(turn(2)) + 5,
-                         budget_chars=50_000)
+                         budget_tokens=20_000)
     assert "OLD" in note and "task 1" in note and "summary failed" in note
     assert kept == turn(2)
 
 
 def test_compact_carries_the_previous_note_forward():
     llm = ScriptedLLM([Reply("new note")])
-    compact(turn(1) + turn(2), "OLD NOTE", llm, keep_tokens=estimate_tokens(turn(2)) + 5, budget_chars=50_000)
+    compact(turn(1) + turn(2), "OLD NOTE", llm, keep_tokens=estimate_tokens(turn(2)) + 5, budget_tokens=20_000)
     assert "OLD NOTE" in llm.requests[0][0][1]["content"]
 
 
 def test_compact_does_nothing_when_nothing_can_be_dropped():
     llm = ScriptedLLM([])
     msgs = [{"role": "user", "content": "x"}]
-    assert compact(msgs, "prev", llm, keep_tokens=1, budget_chars=100) == ("prev", msgs)
+    assert compact(msgs, "prev", llm, keep_tokens=1, budget_tokens=100) == ("prev", msgs)
     assert llm.requests == []
+
+
+def test_a_non_latin_note_is_capped_in_tokens_not_characters():
+    # A character cap sized for English let a Chinese note take 45% of the context.
+    llm = ScriptedLLM([Reply("进度" * 3000)])
+    note, _ = compact(turn(1) + turn(2), "", llm, keep_tokens=estimate_tokens(turn(2)) + 5,
+                      budget_tokens=20_000, max_summary_tokens=1200)
+    assert text_tokens(note) <= 1200
+
+
+def test_the_transcript_sent_for_summarising_fits_its_budget():
+    msgs = [{"role": "user", "content": "目标" * 5000}] + turn(1, 3000) + turn(2)
+    llm = ScriptedLLM([Reply("note")])
+    compact(msgs, "", llm, keep_tokens=estimate_tokens(turn(2)) + 5, budget_tokens=2000)
+    body = llm.requests[0][0][1]["content"]
+    assert text_tokens(body) <= 2000
+
+
+def test_fit_tokens_leaves_short_text_alone_and_keeps_both_ends():
+    assert fit_tokens("short", 100) == "short"
+    cut = fit_tokens("A" * 3000 + "Z" * 3000, 500)
+    assert cut.startswith("A") and cut.endswith("Z") and text_tokens(cut) <= 500

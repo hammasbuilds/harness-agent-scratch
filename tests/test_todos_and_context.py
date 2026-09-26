@@ -81,6 +81,27 @@ def test_git_summary_outside_a_repo(tmp_path):
     assert git_summary(tmp_path) is None
 
 
+def test_git_summary_never_uses_a_repository_planted_at_the_root(tmp_path, monkeypatch):
+    # HEAD + objects/ + refs/ + config written by the model would make git treat
+    # the root as a repo, and its config could run a program on `git log`.
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a) or (_ for _ in ()).throw(OSError()))
+    (tmp_path / "HEAD").write_text("ref: refs/heads/main\n")
+    (tmp_path / "objects").mkdir()
+    (tmp_path / "refs").mkdir()
+    (tmp_path / "config").write_text("[gpg]\n\tprogram = ./evil.sh\n[log]\n\tshowSignature = true\n")
+    assert git_summary(tmp_path.resolve()) is None
+    assert ran == []  # git was not even started
+
+
+def test_git_summary_skips_a_repository_whose_config_runs_programs(tmp_path, monkeypatch):
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a))
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("[gpg]\n\tprogram = ./evil.sh\n")
+    assert git_summary(tmp_path.resolve()) is None and ran == []
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_git_summary_in_a_repo(tmp_path):
     env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",

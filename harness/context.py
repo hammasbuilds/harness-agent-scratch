@@ -13,15 +13,37 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
+from .permissions import repo_config_is_plain
 from .todos import TodoList
 
 
+def _git_dir(workspace: Path) -> Path | None:
+    """The repository the workspace belongs to, found without git's own search.
+
+    git's search would also accept the workspace root itself as a repository if
+    it holds HEAD, objects/ and refs/, which the model can write; its config
+    could then run a program (gpg.program with log.showSignature) every time the
+    harness asks for the branch. So only a real `.git` folder counts, and a
+    workspace `.git` only with a plain config.
+    """
+    own = workspace / ".git"
+    if own.exists():
+        return own if repo_config_is_plain(workspace) else None
+    return next((p / ".git" for p in workspace.parents if (p / ".git").is_dir()), None)
+
+
 def git_summary(workspace: Path) -> str | None:
+    git_dir = _git_dir(workspace)
+    if git_dir is None:
+        return None
+
     def git(*args: str) -> str | None:
         try:
             # git prints UTF-8; the locale codec (cp1252 here) failed on an emoji
             # in a commit subject and took the whole session down with it.
-            out = subprocess.run(["git", *args], cwd=workspace, capture_output=True, encoding="utf-8",
+            out = subprocess.run(["git", f"--git-dir={git_dir}", "-c", "core.fsmonitor=false",
+                                  "-c", "log.showSignature=false", *args],
+                                 cwd=workspace, capture_output=True, encoding="utf-8",
                                  errors="replace", timeout=5, stdin=subprocess.DEVNULL)
         except (OSError, subprocess.TimeoutExpired):
             return None

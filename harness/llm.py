@@ -248,7 +248,7 @@ def _tool_names(tools: list[dict] | None) -> set[str]:
 def _args_object(text: str) -> dict:
     try:
         obj = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
+    except (ValueError, TypeError, RecursionError):
         return {}
     return obj if isinstance(obj, dict) else {}
 
@@ -417,11 +417,14 @@ class OpenAIBackend(_Backend):
             args = fn.get("arguments", "{}")
             calls.append(ToolCall(id=tc.get("id") or "call", name=fn.get("name", ""),
                                   arguments=args if isinstance(args, str) else json.dumps(args)))
-        raw = data.get("usage") or {}
+        # Usage is bookkeeping: a malformed one must not throw away a good answer.
+        raw = data.get("usage")
+        raw = raw if isinstance(raw, dict) else {}
+        details = raw.get("prompt_tokens_details")
         usage = {
             "prompt_tokens": raw.get("prompt_tokens", 0),
             "completion_tokens": raw.get("completion_tokens", 0),
-            "cached_tokens": (raw.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
+            "cached_tokens": details.get("cached_tokens", 0) if isinstance(details, dict) else 0,
         }
         return self._finish(content, calls, usage, tools, truncated=choice.get("finish_reason") == "length")
 

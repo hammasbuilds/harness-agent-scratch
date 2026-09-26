@@ -415,6 +415,34 @@ def test_windows_name_aliases_cannot_slip_past_the_guards(box, workspace, deny, 
     assert deny.asked == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="NTFS alternate data streams")
+@pytest.mark.parametrize("path", [".env::$DATA", ".agents::$INDEX_ALLOCATION/skills/x/SKILL.md", "a.txt:hidden"])
+def test_ntfs_stream_names_cannot_slip_past_the_guards(box, workspace, deny, path):
+    out = run(box, "write_file", path=path, content="planted")
+    assert out.startswith("error:") and "NTFS stream" in out
+    assert not any(workspace.iterdir()) and deny.asked == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="NTFS alternate data streams")
+def test_ntfs_stream_names_cannot_read_a_secret_without_asking(box, workspace, deny):
+    (workspace / ".env").write_text("HARNESS_API_KEY=sk-live")
+    out = run(box, "read_file", path=".env::$DATA")
+    # Refused either as a stream name or, where Windows has already resolved it
+    # to .env, as a credentials file; either way nothing is read without a yes.
+    assert out.startswith("error:") and "sk-live" not in out
+
+
+def test_deeply_nested_arguments_are_an_error_not_a_crash(box):
+    assert box.call("read_file", "[" * 100_000).startswith("error: arguments for read_file could not be read")
+
+
+def test_commands_run_with_fsmonitor_off_after_the_users_own_git_config():
+    from harness.tools import command_env
+    env = command_env({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.name", "GIT_CONFIG_VALUE_0": "me"})
+    assert env["GIT_CONFIG_COUNT"] == "2" and env["GIT_CONFIG_KEY_0"] == "user.name"
+    assert (env["GIT_CONFIG_KEY_1"], env["GIT_CONFIG_VALUE_1"]) == ("core.fsmonitor", "false")
+
+
 def test_git_folders_are_blocked_at_any_depth(box, workspace):
     assert "inside .git/" in run(box, "write_file", path="vendor/lib/.git/hooks/pre-commit", content="x")
     assert "inside .git/" in run(box, "write_file", path=".git", content="gitdir: /elsewhere")
