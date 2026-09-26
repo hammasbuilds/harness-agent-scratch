@@ -124,7 +124,11 @@ def _connection(url: str, timeout: float) -> tuple[http.client.HTTPConnection, s
     port = parts.port or (443 if parts.scheme == "https" else 80)
     target = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
     proxy = urllib.request.getproxies().get(parts.scheme)
-    if proxy and not urllib.request.proxy_bypass(parts.hostname):
+    # The local Ollama is always reached directly: a proxy from the environment
+    # would otherwise receive every prompt, and Python only bypasses localhost
+    # when NO_PROXY says so.
+    loopback = parts.hostname in ("localhost", "::1") or parts.hostname.startswith("127.")
+    if proxy and not loopback and not urllib.request.proxy_bypass(parts.hostname):
         p = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
         # The proxy's own scheme decides how to talk to it and its default port;
         # an HTTPS target through an http:// proxy is a CONNECT over plain HTTP.

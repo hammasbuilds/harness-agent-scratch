@@ -348,6 +348,32 @@ def test_the_end_of_options_marker_is_followed(box_ws, command):
     assert classify(command, box_ws) == ASK
 
 
+@pytest.mark.parametrize("command", ["cat //attacker.example/share/x.txt", "cat \\\\\\\\attacker\\\\share\\\\x",
+                                     "ls //host/c$"])
+def test_network_paths_ask_without_touching_the_network(box_ws, command, monkeypatch):
+    # On Windows, resolving \\host\share opens an SMB connection (and can hand the
+    # host the user's NTLM hash) before anyone is asked.
+    touched = []
+    real = Path.resolve
+    monkeypatch.setattr(Path, "resolve", lambda self, strict=False: touched.append(str(self)) or real(self, strict))
+    assert classify(command, box_ws) == ASK
+    assert not any("attacker" in t or "host" in t for t in touched)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Git Bash's path mapping")
+@pytest.mark.parametrize("command", ["cat /c/Users/dell/.gitconfig", "cat /etc/passwd", "ls /c/Users/dell"])
+def test_git_bash_absolute_paths_count_as_outside(tmp_path, command):
+    # Python reads /c/... as a path on the current drive; Git Bash reads C:\ instead.
+    assert classify(command, tmp_path.resolve()) == ASK
+
+
+def test_a_git_config_carrying_a_token_counts_as_credentials(box_ws):
+    (box_ws / ".git" / "config").write_text(
+        '[core]\n\tbare = false\n[remote "origin"]\n\turl = https://me:ghp_secret@github.com/me/r.git\n')
+    assert classify("cat .git/config", box_ws) == ASK
+    assert classify("grep -rn ghp_ .", box_ws) == ASK
+
+
 @pytest.mark.parametrize("command", ["cat [!a]d_rsa", "cat [[:alpha:]]d_rsa", "cat server.[p]em", "cat [^x]*",
                                      "grep -n '[a-z]' a.txt"])
 def test_bracket_patterns_always_ask(box_ws, command):

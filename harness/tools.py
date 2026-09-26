@@ -51,6 +51,7 @@ _SECRET_NAME = re.compile(
 # GIT_CONFIG_KEY_<n> holds a config key's name, not a secret; dropping it while
 # keeping GIT_CONFIG_COUNT made every git command fail.
 _GIT_CONFIG_KEY = re.compile(r"^GIT_CONFIG_KEY_\d+$")
+_GIT_CONFIG_VAR = re.compile(r"^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$")
 _URL_WITH_PASSWORD = re.compile(r"://[^/\s:@]*:[^/\s@]+@")  # user may be empty: redis://:pw@host
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
 # Encoding labels decode() returns for files with a byte-order mark.
@@ -106,16 +107,26 @@ def command_env(env: Mapping[str, str]) -> dict[str, str]:
     """The environment a command runs with: no credentials, and Python children
     told to write UTF-8. Output is read as UTF-8, but on Windows Python writes the
     ANSI code page to a pipe: "é" arrived as U+FFFD and "✓" crashed the child."""
-    out = {**scrubbed_env(env), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-    # core.fsmonitor=false as well: a repository config that names a monitor
-    # program would otherwise run it on every git status, approved or not.
-    # Appended after any GIT_CONFIG_* entries the user already set.
+    out = {k: v for k, v in scrubbed_env(env).items() if not _GIT_CONFIG_VAR.match(k)}
+    out.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+    # The user's GIT_CONFIG_* pairs are rebuilt, not filtered one variable at a
+    # time: dropping a VALUE whose URL carries a password while keeping COUNT
+    # left a gap that made every git command fail. A pair goes whole or stays whole.
+    pairs = []
     try:
-        n = int(out.get("GIT_CONFIG_COUNT", "0"))
+        count = int(env.get("GIT_CONFIG_COUNT", "0"))
     except ValueError:
-        n = 0
-    out.update({"GIT_CONFIG_COUNT": str(n + 1), f"GIT_CONFIG_KEY_{n}": "core.fsmonitor",
-                f"GIT_CONFIG_VALUE_{n}": "false"})
+        count = 0
+    for i in range(count):
+        key, value = env.get(f"GIT_CONFIG_KEY_{i}"), env.get(f"GIT_CONFIG_VALUE_{i}", "")
+        if key and not _URL_WITH_PASSWORD.search(key + " " + value):
+            pairs.append((key, value))
+    # core.fsmonitor=false last: a repository config that names a monitor program
+    # would otherwise run it on every git status, approved or not.
+    pairs.append(("core.fsmonitor", "false"))
+    out["GIT_CONFIG_COUNT"] = str(len(pairs))
+    for i, (key, value) in enumerate(pairs):
+        out[f"GIT_CONFIG_KEY_{i}"], out[f"GIT_CONFIG_VALUE_{i}"] = key, value
     return out
 
 
@@ -447,6 +458,10 @@ class Toolbox:
     # ---- paths ----------------------------------------------------------
 
     def _resolve(self, path: str) -> Path:
+        if permissions.is_network_path(path):
+            # Refused before resolve(): on Windows resolving \\host\share alone opens
+            # an SMB connection, which can hand the host the user's NTLM hash.
+            raise ToolError(f"{path}: network paths are not read or written")
         try:
             p = Path(path).expanduser()
             return (p if p.is_absolute() else self.workspace / p).resolve()
@@ -486,7 +501,7 @@ class Toolbox:
         inside = any(p == root or p.is_relative_to(root) for root in self.readable_roots)
         if not inside and not self._ask(f"read outside the workspace: {p}"):
             raise ToolError("reading a file outside the workspace was not approved")
-        if inside and permissions.is_secret_file(p.name) and not self._ask(f"read a credentials file: {p}"):
+        if inside and p.exists() and permissions.holds_credentials(p) and not self._ask(f"read a credentials file: {p}"):
             raise ToolError(f"{self._show(p)} looks like a credentials file; reading it was not approved")
 
     def _check_write(self, p: Path) -> None:

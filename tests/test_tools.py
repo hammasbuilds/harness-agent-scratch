@@ -476,6 +476,36 @@ def test_a_symlink_loop_is_a_tool_error_not_a_crash(box, monkeypatch):
     assert run(box, "read_file", path="loop").startswith("error: loop: Symlink loop")
 
 
+@pytest.mark.parametrize("tool, args", [("read_file", {"path": "//attacker.example/share/x"}),
+                                        ("write_file", {"path": "\\\\attacker\\share\\x", "content": "y"})])
+def test_network_paths_are_refused_before_anything_touches_them(box, monkeypatch, tool, args):
+    touched = []
+    monkeypatch.setattr(Path, "resolve", lambda self, strict=False: touched.append(str(self)) or self)
+    assert "network paths are not read or written" in box.call(tool, json.dumps(args))
+    assert touched == []
+
+
+def test_reading_a_git_config_with_a_token_asks(box, workspace, deny):
+    (workspace / ".git").mkdir()
+    (workspace / ".git" / "config").write_text('[remote "o"]\n\turl = https://me:ghp_secret@github.com/r.git\n')
+    out = run(box, "read_file", path=".git/config")
+    assert "credentials file" in out and "ghp_secret" not in out
+
+
+def test_user_git_config_pairs_are_rebuilt_whole():
+    from harness.tools import command_env
+    env = command_env({
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "url.https://me:tok@github.com/.insteadOf", "GIT_CONFIG_VALUE_0": "https://github.com/",
+        "GIT_CONFIG_KEY_1": "user.name", "GIT_CONFIG_VALUE_1": "me",
+    })
+    # The credentialed pair goes whole; what stays is numbered without a gap.
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("user.name", "me")
+    assert (env["GIT_CONFIG_KEY_1"], env["GIT_CONFIG_VALUE_1"]) == ("core.fsmonitor", "false")
+    assert "GIT_CONFIG_KEY_2" not in env
+
+
 def test_deeply_nested_arguments_are_an_error_not_a_crash(box):
     assert box.call("read_file", "[" * 100_000).startswith("error: arguments for read_file could not be read")
 

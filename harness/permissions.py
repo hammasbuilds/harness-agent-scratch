@@ -110,13 +110,38 @@ def is_secret_file(name: str) -> bool:
     return bool(_SECRET_FILE.match(re.split(r"[\\/]", name)[-1]))
 
 
+_URL_WITH_PASSWORD = re.compile(r"://[^/\s:@]*:[^/\s@]+@")
+
+
+def holds_credentials(path: Path) -> bool:
+    """A credentials file by name, or a git config whose remote URL carries a
+    token (`https://me:ghp_...@github.com/...`, a common setup)."""
+    if is_secret_file(path.name):
+        return True
+    if path.name == "config" and path.parent.name == ".git":
+        try:
+            return bool(_URL_WITH_PASSWORD.search(path.read_text(encoding="utf-8", errors="replace")))
+        except OSError:
+            return True
+    return False
+
+
+def is_network_path(token: str) -> bool:
+    """`//host/share` or `\\\\host\\share`. On Windows, even resolving one opens an SMB
+    connection to the host, which can hand it the user's NTLM hash, so such a
+    path must be refused before anything touches it."""
+    return token.startswith(("//", "\\\\")) or token.startswith(("/\\", "\\/"))
+
+
 def workspace_exposure(workspace: Path) -> tuple[bool, bool]:
     """(holds a credentials file, holds a symlink or junction leading outside).
 
     A recursive reader would read the first; one that follows links would walk
     out through the second. A tree too big to scan counts as both.
     """
-    secrets = outward = False
+    # The scan skips .git, but its config can hold a token in a remote URL.
+    secrets = holds_credentials(workspace / ".git" / "config") if (workspace / ".git" / "config").exists() else False
+    outward = False
     seen = 0
     for root, dirs, files in os.walk(workspace):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
@@ -126,9 +151,16 @@ def workspace_exposure(workspace: Path) -> tuple[bool, bool]:
         secrets = secrets or any(is_secret_file(f) for f in files)
         for name in dirs + files:
             p = Path(root) / name
-            if (p.is_symlink() or getattr(os.path, "isjunction", lambda _: False)(p)) and \
-                    _outside_or_secret(str(p), workspace):
-                outward = True
+            if p.is_symlink() or getattr(os.path, "isjunction", lambda _: False)(p):
+                # Read the link's target before resolving it: resolving a link to
+                # \\host\share would contact that host.
+                try:
+                    target = os.readlink(p)
+                except OSError:
+                    target = ""
+                if is_network_path(target) or target.upper().startswith(("\\\\?\\UNC", "\\??\\UNC")) or \
+                        _outside_or_secret(str(p), workspace):
+                    outward = True
         if secrets and outward:
             break
     return secrets, outward
@@ -139,6 +171,8 @@ def workspace_has_secrets(workspace: Path) -> bool:
 
 
 def _outside_or_secret(path: str, workspace: Path) -> bool:
+    if is_network_path(path):
+        return True
     try:
         p = Path(path).expanduser()
         resolved = (p if p.is_absolute() else workspace / p).resolve()
@@ -147,7 +181,7 @@ def _outside_or_secret(path: str, workspace: Path) -> bool:
     if not (resolved == workspace or resolved.is_relative_to(workspace)):
         return True
     # resolve() turns an 8.3 short name (ENV~1) into the real one (.env).
-    return resolved.exists() and is_secret_file(resolved.name)
+    return resolved.exists() and holds_credentials(resolved)
 
 
 def unsafe_target(token: str, workspace: Path | None) -> bool:
@@ -155,6 +189,12 @@ def unsafe_target(token: str, workspace: Path | None) -> bool:
     if token in ("-", "/dev/null"):
         return False
     if "{" in token or "}" in token or is_secret_file(token):
+        return True
+    if is_network_path(token):
+        return True  # decided before any resolve(), glob or exists(): those would contact the host
+    if os.name == "nt" and token.startswith("/"):
+        # Git Bash maps /c/... to C:\ and /etc to its own folder; Python reads both
+        # as paths on the current drive, so the check below would look elsewhere.
         return True
     # Bracket patterns: bash has negation ([!a]) and classes ([[:alpha:]]) that
     # Python's glob reads as literal characters, so the expansion below could find

@@ -367,6 +367,17 @@ def test_a_proxy_without_a_port_gets_its_own_schemes_default(monkeypatch):
     assert type(conn) is http.client.HTTPConnection and target == "/api/v1/chat/completions"
 
 
+@pytest.mark.parametrize("url", ["http://localhost:11434/api/chat", "http://127.0.0.1:11434/api/chat",
+                                 "http://[::1]:11434/api/chat"])
+def test_the_local_model_is_never_reached_through_a_proxy(monkeypatch, url):
+    # A proxy from the environment would otherwise receive every prompt.
+    from harness.llm import _connection
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {"http": "http://proxy.example:3128"})
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
+    conn, target = _connection(url, 5)
+    assert conn.host != "proxy.example" and target == "/api/chat"
+
+
 def test_deeply_nested_json_is_an_llm_error_not_a_recursion_crash(monkeypatch):
     fake_connection(monkeypatch, response=FakeResponse(b"[" * 200_000 + b"]" * 200_000))
     with pytest.raises(LLMError, match="RecursionError"):

@@ -12,8 +12,8 @@ from dataclasses import dataclass
 STATUSES = ("pending", "in_progress", "completed")
 # The list rides in every request's reminder, which cannot be trimmed; an
 # unbounded one (80 items of 400 characters) made every later request overflow.
-MAX_ITEMS = 30
-MAX_ITEM_CHARS = 200
+MAX_ITEMS = 20
+MAX_ITEM_CHARS = 120
 MARKS = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
 
 
@@ -53,6 +53,16 @@ class TodoList:
             raise TodoError("only one item may be in_progress at a time")
         self.items = items
         return self.render()
+
+    def render_open(self) -> str:
+        """What the reminder shows: open items only, since finished ones need no
+        attention and every character here is paid for on every request."""
+        open_items = [t for t in self.items if t.status != "completed"]
+        done = len(self.items) - len(open_items)
+        lines = [f"{MARKS[t.status]} {t.content}" for t in open_items]
+        if done:
+            lines.append(f"({done} completed)")
+        return "\n".join(lines) or "(no todos)"
 
     def render(self) -> str:
         if not self.items:

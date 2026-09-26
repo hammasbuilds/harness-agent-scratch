@@ -37,10 +37,17 @@ def test_todo_list_size_is_bounded():
     # It rides in every request's reminder, which cannot be trimmed: 80 items of
     # 400 characters once made every later request overflow.
     todos = TodoList()
-    with pytest.raises(TodoError, match="at most 30"):
-        todos.replace([{"content": f"step {i}", "status": "pending"} for i in range(31)])
-    with pytest.raises(TodoError, match="keep each under 200"):
-        todos.replace([{"content": "x" * 201, "status": "pending"}])
+    with pytest.raises(TodoError, match="at most 20"):
+        todos.replace([{"content": f"step {i}", "status": "pending"} for i in range(21)])
+    with pytest.raises(TodoError, match="keep each under 120"):
+        todos.replace([{"content": "x" * 121, "status": "pending"}])
+
+
+def test_the_reminder_shows_only_open_todos():
+    todos = TodoList()
+    todos.replace([{"content": f"done {i}", "status": "completed"} for i in range(5)]
+                  + [{"content": "now", "status": "in_progress"}, {"content": "next", "status": "pending"}])
+    assert todos.render_open() == "[>] now\n[ ] next\n(5 completed)"
 
 
 def test_reminder_parts_are_bounded(tmp_path):

@@ -371,6 +371,34 @@ def test_the_compaction_request_fits_beside_its_reply(cfg, make_agent, workspace
     assert seen and seen[0] <= agent.prompt_room()  # was ~6,389 against 6,144
 
 
+def test_the_fixed_context_fits_at_default_settings_with_every_cap_full(cfg, make_agent, tmp_path):
+    # 12 skills, a full todo list and a handoff note at its cap once added up to
+    # more than the prompt room, and every later turn overflowed.
+    from harness.agent import SUMMARY_SHARE
+    from harness.compaction import fit_tokens
+    from harness.todos import MAX_ITEM_CHARS, MAX_ITEMS
+    skills = tmp_path / "skills"
+    for i in range(12):
+        (skills / f"s{i}").mkdir(parents=True)
+        (skills / f"s{i}" / "SKILL.md").write_text(f"---\nname: skill{i}\ndescription: {'does a thing well ' * 16}\n---\n")
+    cfg.skills_dirs = [skills]
+    cfg.max_output_tokens, cfg.context_limit = 2048, 8192
+    agent = make_agent(ScriptedLLM([]))
+    agent.todos.replace([{"content": "w" * MAX_ITEM_CHARS, "status": "pending"} for _ in range(MAX_ITEMS)])
+    agent.summary = fit_tokens("the note says things " * 2000, int(8192 * SUMMARY_SHARE))
+    assert agent.overhead_tokens() < agent.prompt_budget()
+
+
+def test_an_oversized_fixed_context_is_named_as_the_cause(cfg, make_agent):
+    from harness.llm import ContextOverflow
+    llm = ScriptedLLM([])
+    agent = make_agent(llm)
+    agent.summary = "note " * 20_000
+    with pytest.raises(ContextOverflow, match="the harness's own context"):
+        agent.send("hi")
+    assert llm.requests == []  # no summarising call burnt on a problem it cannot fix
+
+
 def test_a_cut_off_subagent_answer_says_so():
     from harness.subagent import _finish
     assert _finish("half an ans", lambda k, d: None, truncated=True).endswith("cut off at the model's output limit]")

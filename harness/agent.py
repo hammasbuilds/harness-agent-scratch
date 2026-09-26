@@ -48,7 +48,7 @@ Skills (load one with read_skill when it fits the task):
 STRIPPED_KEEP = 200
 REPEAT_WARNING = 3  # identical call + identical result this many times in a row
 MIN_KEEP_TOKENS = 256
-SUMMARY_SHARE = 0.15  # the handoff note may use at most this share of the context
+SUMMARY_SHARE = 0.10  # the handoff note may use at most this share of the context
 COMPACT_OVERHEAD = 400  # tokens for the summariser's instructions and the message framing
 
 
@@ -199,6 +199,15 @@ class Agent:
             del self.toolbox.seen[p]
 
     def _maybe_compact(self) -> None:
+        # The fixed part (system prompt, skills, schemas, handoff note, reminder)
+        # cannot be compacted or squeezed; if it alone is too big, compacting only
+        # burns a model call and the message to the user would blame the wrong thing.
+        overhead = self.overhead_tokens()
+        if overhead > self.prompt_budget():
+            raise ContextOverflow(
+                f"the harness's own context (system prompt, skills, tool schemas, handoff note, todo list: "
+                f"~{overhead} tokens) leaves no room in the {self.prompt_room()} tokens available. /clear "
+                "resets the note and the todos; fewer or shorter skills, or a larger HARNESS_NUM_CTX, also help.")
         self._compact_old_turns()
         self._squeeze_current_turn()
 

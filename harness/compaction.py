@@ -57,11 +57,12 @@ def _letter_tokens(run: str) -> int:
 def text_tokens(text: str) -> int:
     """A pessimistic token count, shaped like BPE pre-tokenisation.
 
-    Calibrated against the Qwen2.5 tokenizer on 27 kinds of text (prose, code,
+    Calibrated against the Qwen2.5 tokenizer on 34 kinds of text (prose, code,
     JSON, CSV, `seq` output, hashes, base64, base32, paths, DNA and protein
-    sequences, random letters in either case, long words, CJK, Cyrillic, emoji):
-    on every one the real count was at most 0.92 of the estimate, which is about
-    1.6x the real count on average. Underestimating is the failure that matters,
+    sequences, random letters in either case, long words, CJK, Cyrillic, Hindi,
+    Georgian, Thai, Amharic, Hebrew and Arabic, math symbols, Braille spinners,
+    emoji): on every one the real count was at most 0.92 of the estimate, which
+    is about 1.7x the real count on average. Underestimating is the failure that matters,
     since Ollama silently drops the start of an overlong prompt; overestimating
     only compacts sooner. The flat "characters / 3" this replaced was 3x too low
     on digits (Qwen makes every digit a token) and 2x on JSON; the version before

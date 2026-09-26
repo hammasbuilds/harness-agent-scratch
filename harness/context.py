@@ -35,8 +35,7 @@ def _git_dir(workspace: Path) -> Path | None:
     A parent folder's `.git` is used as it is: the model cannot write outside
     the workspace, and only symbolic-ref, rev-parse and `log --format` run, none
     of which starts a program from config. A `.git` *file* (a worktree or a
-    submodule checkout) is not followed, so there the reminder shows the
-    enclosing repository's branch, or none.
+    submodule checkout) is not followed, and the reminder then shows no branch.
     """
     own = workspace / ".git"
     if own.exists():
@@ -102,7 +101,7 @@ def build_reminder(*, workspace: Path, todos: TodoList, seen: dict[Path, tuple[i
     if git:
         lines.append(f"Git: {git}")
     if todos.items:
-        lines += ["Todo list:", todos.render()]
+        lines += ["Todo list:", todos.render_open()]
     stale = stale_files(seen)
     if stale:
         lines.append("These files changed on disk since you last read them; read them again before editing:")
