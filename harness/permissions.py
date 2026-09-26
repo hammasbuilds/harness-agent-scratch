@@ -48,7 +48,16 @@ UNSAFE_FLAGS = {
     "find": {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"},
     "rg": {"--pre", "--pre-glob", "--search-zip", "-z"},
     "git": {"--output", "--ext-diff", "--textconv", "--exec", "--upload-pack", "--open-files-in-pager", "-O"},
+    # Read the names of the files to read from another file, which the model can
+    # write without asking and fill with paths outside the workspace.
+    "wc": {"--files0-from"},
+    "du": {"--files0-from"},
 }
+# A repository's own config can make read-only git commands run programs:
+# diff.external on diff/log -p/show, core.fsmonitor on status, textconv filters,
+# a pager. The model cannot write .git, but an unpacked archive can bring one.
+_GIT_CONFIG_RISK = re.compile(r"fsmonitor|external|textconv|pager|include|\bfilter\b|sshcommand|askpass",
+                              re.I)
 RECURSIVE = {"grep": "rR", "egrep": "rR", "fgrep": "rR", "diff": "r"}  # short letters meaning "recurse"
 NEVER_NAMES = re.compile(r"^(mkfs(\.\w+)?|shutdown|reboot|halt|poweroff|diskpart|format)$")
 NEVER_RAW = [
@@ -68,7 +77,9 @@ _SECRET_FILE = re.compile(
 )
 # cmd.exe searches the current folder before PATH and gives these characters
 # meanings shlex does not model; only a plain `dir`/`echo` runs without asking.
-_CMD_PLAIN = re.compile(r"(dir|echo)( [\w.\-/\\]+)*")
+# No backslashes (POSIX shlex would drop them, hiding `..\..` and `\\host\share`)
+# and no `..` at all.
+_CMD_PLAIN = re.compile(r"(dir|echo)( [\w.\-/]+)*")
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".harness", ".tox", "dist", "build"}
 _SCAN_LIMIT = 50_000
 
@@ -225,6 +236,20 @@ def _repo_is_workspace(workspace: Path) -> bool:
     return not any((parent / ".git").exists() for parent in workspace.parents)
 
 
+def _repo_config_is_plain(workspace: Path) -> bool:
+    """False if the repository's config sets anything that runs a program."""
+    git = workspace / ".git"
+    if git.is_file():
+        return False  # a gitdir pointer: the real config lives elsewhere
+    config = git / "config"
+    try:
+        return not _GIT_CONFIG_RISK.search(config.read_text(encoding="utf-8", errors="replace"))
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
 def _git_ok(args: list[str], workspace: Path | None) -> bool:
     i = 0
     while i < len(args) and args[i] == "--no-pager":
@@ -236,7 +261,7 @@ def _git_ok(args: list[str], workspace: Path | None) -> bool:
         return False  # pathspec magic (:/) and object paths (HEAD:../x) reach past the workspace
     if any(_flag_matches(a, UNSAFE_FLAGS["git"]) for a in rest):
         return False
-    return workspace is None or _repo_is_workspace(workspace)
+    return workspace is None or (_repo_is_workspace(workspace) and _repo_config_is_plain(workspace))
 
 
 def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = False) -> str:
@@ -245,7 +270,7 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
         return DENY
     if any(s in command for s in ("$", "`", "<(", ">(")):
         return ASK
-    if cmd_shell and not _CMD_PLAIN.fullmatch(command.strip()):
+    if cmd_shell and (not _CMD_PLAIN.fullmatch(command.strip()) or ".." in command):
         return ASK
     try:
         lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)

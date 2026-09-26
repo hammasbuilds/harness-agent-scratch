@@ -7,7 +7,7 @@ because that endpoint accepts per-request `options` and the OpenAI-compatible
 another job owns the GPU, and `num_ctx` is what stops Ollama cutting the prompt
 at its small default context.
 
-No SDK: one POST with urllib per call.
+No SDK: one POST with http.client per call.
 """
 
 from __future__ import annotations
@@ -17,8 +17,10 @@ import http.client
 import itertools
 import json
 import re
+import socket
+import threading
 import time
-import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
@@ -112,42 +114,86 @@ def _retry_after(headers) -> float | None:
         return None
 
 
+def _connection(url: str, timeout: float) -> tuple[http.client.HTTPConnection, str]:
+    """A connection for `url` (through the environment's proxy, if one applies)
+    and the request target to send on it."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise LLMError(f"not an http(s) URL: {url}")
+    cls = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    target = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
+    proxy = urllib.request.getproxies().get(parts.scheme)
+    if proxy and not urllib.request.proxy_bypass(parts.hostname):
+        p = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+        conn = http.client.HTTPConnection(p.hostname, p.port or 80, timeout=timeout) if parts.scheme == "http" \
+            else http.client.HTTPSConnection(p.hostname, p.port or 443, timeout=timeout)
+        if parts.scheme == "https":
+            conn.set_tunnel(parts.hostname, port)
+        else:
+            target = url  # a plain-HTTP proxy wants the absolute URL
+        return conn, target
+    return cls(parts.hostname, port, timeout=timeout), target
+
+
 def http_post_json(url: str, body: dict, headers: dict, timeout: float) -> dict:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", **headers},
-        method="POST",
-    )
-    # urllib's timeout applies to each socket read, so a server sending one byte
-    # a second never trips it. The deadline covers the whole response, error
-    # bodies included.
+    """One JSON POST, bounded as a whole.
+
+    - A timer closes the socket at the deadline, so a server trickling its
+      status line, its headers or its body cannot stretch the request; the
+      per-read socket timeout alone never trips on one byte a second.
+    - Redirects are not followed. urllib would follow a 302 as a GET and send
+      the Authorization header, the API key, to whatever host it named.
+    """
+    data = json.dumps(body).encode("utf-8")
     deadline = time.monotonic() + timeout
+    conn, target = _connection(url, timeout)
+    expired = threading.Event()
+
+    def expire():
+        expired.set()
+        sock = getattr(conn, "sock", None)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
+
+    timer = threading.Timer(timeout, expire)
+    timer.daemon = True
+    timer.start()
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        conn.request("POST", target, body=data,
+                     headers={"Content-Type": "application/json", "Content-Length": str(len(data)), **headers})
+        response = conn.getresponse()
+        status, reply_headers = response.status, response.headers
+        if status >= 300:
+            raw = _read_body(response, deadline, MAX_ERROR_BYTES, url, truncate=True)
+        else:
             raw = _read_body(response, deadline, MAX_RESPONSE_BYTES, url)
     except LLMError:
         raise
-    except urllib.error.HTTPError as e:
-        try:
-            body = _read_body(e, deadline, MAX_ERROR_BYTES, url, truncate=True)
-        except (OSError, http.client.HTTPException):
-            body = b""
-        raise LLMError(f"HTTP {e.code} from {url}: {body.decode('utf-8', 'replace')[:2000]}",
-                       retryable=e.code in RETRY_STATUS, retry_after=_retry_after(e.headers)) from None
-    except urllib.error.URLError as e:
-        timed_out = isinstance(e.reason, TimeoutError)
-        refused = isinstance(e.reason, ConnectionRefusedError)
-        what = f"timed out after {timeout:.0f}s" if timed_out else f"cannot reach {url}: {e.reason}"
-        raise LLMError(f"{what} ({url})" if timed_out else what, retryable=not (timed_out or refused)) from None
-    except TimeoutError:
-        raise LLMError(f"timed out after {timeout:.0f}s waiting for {url}") from None
-    except (OSError, http.client.HTTPException) as e:  # reset, dropped, incomplete read
-        raise LLMError(f"connection to {url} failed: {e!r}", retryable=True) from None
+    except ConnectionRefusedError as e:
+        raise LLMError(f"cannot reach {url}: {e}") from None  # not running; retrying will not start it
+    except (OSError, http.client.HTTPException) as e:
+        if expired.is_set() or isinstance(e, TimeoutError):
+            raise LLMError(f"timed out after {timeout:.0f}s waiting for {url}") from None
+        raise LLMError(f"connection to {url} failed: {e!r}", retryable=True) from None  # reset, dropped
+    finally:
+        timer.cancel()
+        conn.close()
+
+    if 300 <= status < 400:
+        raise LLMError(f"HTTP {status} from {url}: redirect to {reply_headers.get('Location')!r} not followed "
+                       "(it would carry the API key to another address)")
+    if status >= 400:
+        raise LLMError(f"HTTP {status} from {url}: {raw.decode('utf-8', 'replace')[:2000]}",
+                       retryable=status in RETRY_STATUS, retry_after=_retry_after(reply_headers))
     try:
         return json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise LLMError(f"{url} did not return JSON ({e}): {raw[:300]!r}") from None
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
+        raise LLMError(f"{url} did not return usable JSON ({type(e).__name__}): {raw[:300]!r}") from None
 
 
 _TAGGED_CALL = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
@@ -232,7 +278,7 @@ class _Backend:
             return self._parse(data, tools, url)
         except LLMError:
             raise
-        except (AttributeError, TypeError, KeyError, IndexError, ValueError) as e:
+        except (AttributeError, TypeError, KeyError, IndexError, ValueError, RecursionError) as e:
             raise LLMError(f"{url} answered in an unexpected shape ({e}): {str(data)[:300]}") from None
 
     def _endpoint(self) -> tuple[str, dict]:
@@ -246,6 +292,15 @@ class _Backend:
 
     def _finish(self, content: str, calls: list[ToolCall], usage: dict, tools: list[dict] | None,
                 truncated: bool = False) -> Reply:
+        # Valid JSON with the wrong types ("content": 123, "name": ["bash"]) would
+        # otherwise surface far away, as a crash in the printer or the toolbox.
+        if not isinstance(content, str):
+            raise TypeError(f"content is {type(content).__name__}, not text")
+        for c in calls:
+            if not isinstance(c.name, str) or not isinstance(c.arguments, str):
+                raise TypeError(f"tool call has a {type(c.name).__name__} name or {type(c.arguments).__name__} arguments")
+        if not isinstance(usage, dict) or not all(isinstance(v, int) for v in usage.values()):
+            usage = {}
         if not calls and tools:
             calls = extract_inline_tool_calls(content, _tool_names(tools))
             if calls:

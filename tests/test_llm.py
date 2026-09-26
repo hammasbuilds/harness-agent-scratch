@@ -291,30 +291,139 @@ def test_refused_connection_is_an_llm_error_and_not_retried():
     assert err.value.retryable is False  # the server is not running; retrying will not start it
 
 
+class FakeResponse:
+    def __init__(self, body: bytes, status: int = 200, headers=None):
+        self.chunks, self.status, self.headers = [body], status, headers or {}
+
+    def read1(self, n=-1):
+        return self.chunks.pop() if self.chunks else b""
+
+
+class FakeConnection:
+    """Stands in for http.client: raises `error` on request, or returns `response`."""
+
+    def __init__(self, error=None, response=None):
+        self.error, self.response, self.sock = error, response, None
+
+    def request(self, *args, **kwargs):
+        if self.error:
+            raise self.error
+
+    def getresponse(self):
+        return self.response
+
+    def close(self):
+        pass
+
+
+def fake_connection(monkeypatch, **kwargs):
+    monkeypatch.setattr("harness.llm._connection", lambda url, timeout: (FakeConnection(**kwargs), "/api/chat"))
+
+
 @pytest.mark.parametrize("error, retryable", [
     (ConnectionResetError(10054, "reset"), True),
     (http.client.RemoteDisconnected("gone"), True),
     (http.client.IncompleteRead(b"par"), True),
     (TimeoutError("read timed out"), False),
+    (ConnectionRefusedError(10061, "refused"), False),
 ])
 def test_network_failures_never_escape_as_raw_exceptions(monkeypatch, error, retryable):
-    def fail(*a, **k):
-        raise error
-    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    fake_connection(monkeypatch, error=error)
     with pytest.raises(LLMError) as err:
         http_post_json("http://x/api/chat", {}, {}, 1)
     assert err.value.retryable is retryable
 
 
 def test_non_json_body_is_an_llm_error(monkeypatch):
-    class Resp:
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        body = [b"<html>502 Bad Gateway</html>"]
-        def read1(self, n=-1): return self.body.pop() if self.body else b""
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Resp())
-    with pytest.raises(LLMError, match="did not return JSON"):
+    fake_connection(monkeypatch, response=FakeResponse(b"<html>502 Bad Gateway</html>"))
+    with pytest.raises(LLMError, match="did not return usable JSON"):
         http_post_json("http://x/api/chat", {}, {}, 1)
+
+
+def test_deeply_nested_json_is_an_llm_error_not_a_recursion_crash(monkeypatch):
+    fake_connection(monkeypatch, response=FakeResponse(b"[" * 200_000 + b"]" * 200_000))
+    with pytest.raises(LLMError, match="RecursionError"):
+        http_post_json("http://x/api/chat", {}, {}, 1)
+
+
+def test_redirects_are_refused_so_the_key_never_travels(monkeypatch):
+    fake_connection(monkeypatch, response=FakeResponse(b"", status=302, headers={"Location": "http://evil.example/"}))
+    with pytest.raises(LLMError, match="redirect to 'http://evil.example/' not followed") as err:
+        http_post_json("http://x/api/chat", {}, {"Authorization": "Bearer sk-secret"}, 1)
+    assert not err.value.retryable
+
+
+class _RedirectHandler(BaseHTTPRequestHandler):
+    seen: list = []
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.send_response(302)
+        self.send_header("Location", f"http://localhost:{self.server.server_port}/elsewhere")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self):  # urllib turned the POST into this GET, carrying the key
+        _RedirectHandler.seen.append(self.headers.get("Authorization"))
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+def test_a_real_redirect_never_reaches_the_second_address():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _RedirectHandler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(LLMError, match="HTTP 302"):
+            http_post_json(f"http://127.0.0.1:{server.server_port}/api/chat", {}, {"Authorization": "Bearer sk"}, 5)
+    finally:
+        server.shutdown()
+    assert _RedirectHandler.seen == []
+
+
+class _SlowHeadersHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+        for i in range(40):
+            try:
+                self.wfile.write(f"X-Slow-{i}: y\r\n".encode())
+                self.wfile.flush()
+            except OSError:
+                return
+            time.sleep(0.2)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_the_deadline_also_covers_a_trickled_status_line_and_headers():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _SlowHeadersHandler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    start = time.monotonic()
+    try:
+        with pytest.raises(LLMError, match="timed out"):
+            http_post_json(f"http://127.0.0.1:{server.server_port}/api/chat", {}, {}, 1.0)
+        elapsed = time.monotonic() - start
+    finally:
+        server.shutdown()
+    assert elapsed < 3  # 40 headers at 0.2 s would take 8 s
+
+
+@pytest.mark.parametrize("backend", [OllamaBackend, OpenAIBackend])
+@pytest.mark.parametrize("message", [
+    {"content": 123, "tool_calls": [{"function": {"name": "bash", "arguments": {}}}]},
+    {"content": "", "tool_calls": [{"function": {"name": ["bash"], "arguments": {}}}]},
+])
+def test_wrong_typed_fields_are_an_llm_error(tmp_path, backend, message):
+    kind = "openai" if backend is OpenAIBackend else "ollama"
+    body = {"message": message, "choices": [{"message": message}]}
+    with pytest.raises(LLMError, match="unexpected shape"):
+        backend(cfg(tmp_path, backend=kind), FakePost(body)).chat(HISTORY, TOOLS)
 
 
 class FlakyPost:

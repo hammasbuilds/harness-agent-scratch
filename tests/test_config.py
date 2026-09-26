@@ -97,6 +97,13 @@ def test_notepad_bom_does_not_hide_the_first_setting(tmp_path):
     assert env == {"HARNESS_MODEL": "x"}
 
 
+@pytest.mark.parametrize("value", ["nan", "inf", "-1", "3"])
+def test_temperature_must_be_a_real_number_in_range(tmp_path, value):
+    # nan passed every comparison and was sent as NaN, which is not valid JSON
+    with pytest.raises(ValueError, match="temperature"):
+        Config.from_env(tmp_path, {"HARNESS_TEMPERATURE": value})
+
+
 def test_compaction_thresholds_must_be_ordered(tmp_path):
     with pytest.raises(ValueError, match="compact_to"):
         Config(workspace=tmp_path, compact_at=0.3, compact_to=0.5)

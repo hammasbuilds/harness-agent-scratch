@@ -17,6 +17,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
@@ -31,6 +32,7 @@ from .todos import TodoError, TodoList
 
 Approver = Callable[[str], bool]
 MAX_BASH_TIMEOUT = 600
+PIPE_GRACE = 2.0  # seconds to finish reading output after the shell exits
 MAX_READ_BYTES = 10_000_000
 # A command that prints without end must not fill RAM on a machine that is
 # training: keep this much of the start and of the end, drop the middle.
@@ -171,14 +173,78 @@ class _Capture:
         return f"{head}\n[... {self.dropped:,} characters of output dropped ...]\n{tail}"
 
 
-def _kill_tree(proc: subprocess.Popen) -> None:
+class _WindowsJob:
+    """A Windows Job Object that kills every process in it when closed.
+
+    taskkill /T walks the parent-child tree, which breaks once the shell has
+    exited: its orphaned background children can no longer be found. A job
+    holds them regardless. (A child started in the milliseconds between
+    process creation and assignment could escape; bash starts nothing that fast.)
+    """
+
+    def __init__(self, proc: subprocess.Popen):
+        import ctypes
+        from ctypes import wintypes
+
+        class Basic(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [("Basic", Basic), ("IoInfo", ctypes.c_ulonglong * 6),
+                        ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        k32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.k32 = k32
+        self.handle = k32.CreateJobObjectW(None, None)
+        if not self.handle:
+            raise OSError("CreateJobObject failed")
+        info = Extended()
+        info.Basic.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not (k32.SetInformationJobObject(self.handle, 9, ctypes.byref(info), ctypes.sizeof(info))
+                and k32.AssignProcessToJobObject(self.handle, int(proc._handle))):
+            self.close()
+            raise OSError("could not put the command in a job object")
+
+    def kill(self) -> None:
+        if self.handle:
+            self.k32.TerminateJobObject(self.handle, 1)
+
+    def close(self) -> None:
+        if self.handle:
+            self.k32.CloseHandle(self.handle)  # kills whatever is still in the job
+            self.handle = None
+
+
+def _contain(proc: subprocess.Popen) -> "_WindowsJob | None":
+    if os.name != "nt":
+        return None  # POSIX: the command leads its own process group instead
+    try:
+        return _WindowsJob(proc)
+    except (OSError, AttributeError, ValueError):
+        return None
+
+
+def _kill_tree(proc: subprocess.Popen, job: "_WindowsJob | None" = None) -> None:
     """Kill a command and everything it started.
 
     Killing only the shell is not enough: its children (a `sleep`, a dev server)
     keep the output pipes open, and reading them then blocks until they exit on
     their own, which for a server is never.
     """
-    if os.name == "nt":
+    if job is not None:
+        job.kill()
+    elif os.name == "nt":
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
     else:
         try:
@@ -372,6 +438,11 @@ class Toolbox:
         if not self._inside(p):
             raise ToolError(f"{p} is outside the workspace ({self.workspace}); writes are confined to it")
         rel = p.relative_to(self.workspace).parts
+        if os.name == "nt" and any(part != part.rstrip(". ") for part in rel):
+            # Windows drops a trailing dot or space when it creates a name, so
+            # `.env.` becomes .env and `.agents./x` lands in .agents, past every
+            # name check below, which would see the undotted name only after.
+            raise ToolError(f"{self._show(p)}: a name ending in a dot or space is not allowed on Windows")
         top = rel[0].lower() if rel else ""
         blocked = next((part for part in rel if part.lower() in BLOCKED_DIRS), None)
         if blocked:  # at any depth: sub/.git/hooks runs code as surely as .git/hooks
@@ -431,23 +502,40 @@ class Toolbox:
         proc = subprocess.Popen(argv, cwd=self.workspace, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                                 env=scrubbed_env(os.environ), **group)
+        job = _contain(proc)
         out_cap, err_cap = _Capture(proc.stdout), _Capture(proc.stderr)
         try:
-            proc.wait(timeout=timeout)
-            status = f"[exit code {proc.returncode}]"
-        except subprocess.TimeoutExpired:
-            _kill_tree(proc)
-            # Keep what it printed: a hung test run's last lines say where it hung.
-            status = f"[timed out after {timeout}s and was killed; output so far is above]"
-        except BaseException:  # Ctrl-C: do not leave the command running behind the agent
-            _kill_tree(proc)
-            raise
-        for cap in (out_cap, err_cap):
-            cap.thread.join(timeout=5)  # a background child may still hold the pipe; do not wait on it
+            try:
+                proc.wait(timeout=timeout)
+                status = f"[exit code {proc.returncode}]"
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc, job)
+                # Keep what it printed: a hung test run's last lines say where it hung.
+                status = f"[timed out after {timeout}s and was killed; output so far is above]"
+            except BaseException:  # Ctrl-C: do not leave the command running behind the agent
+                _kill_tree(proc, job)
+                raise
+            if not self._drain(out_cap, err_cap, seconds=PIPE_GRACE):
+                # The shell is gone but something it started in the background still
+                # holds the output. Commands are one-shot here: stop it.
+                _kill_tree(proc, job)
+                self._drain(out_cap, err_cap, seconds=PIPE_GRACE)
+                status += "\n[a background process it started was stopped; commands here cannot outlive their call]"
+        finally:
+            if job is not None:
+                job.close()
         out, err = strip_ansi(out_cap.text()), strip_ansi(err_cap.text())
         if err:
             out += ("\n" if out and not out.endswith("\n") else "") + "[stderr]\n" + err
         return f"{out.rstrip()}\n{status}".lstrip()
+
+    @staticmethod
+    def _drain(*captures: _Capture, seconds: float) -> bool:
+        """Wait for the readers against one shared deadline; True if all finished."""
+        deadline = time.monotonic() + seconds
+        for cap in captures:
+            cap.thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        return not any(cap.thread.is_alive() for cap in captures)
 
     def read_file(self, path: str, offset: int = 1, limit: int = 2000) -> str:
         p = self._resolve(path)

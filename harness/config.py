@@ -100,8 +100,13 @@ class Config:
                           ("subagent_max_steps", 1), ("num_thread", 1), ("retries", 0)):
             if getattr(self, name) < low:
                 problems.append(f"{name} must be at least {low}, got {getattr(self, name)}")
-        if self.request_timeout <= 0:
+        if not self.request_timeout > 0:
             problems.append("request_timeout must be positive")
+        # nan passes every < and > comparison, and serialises as NaN, which is not JSON.
+        if not 0 <= self.temperature <= 2:
+            problems.append(f"temperature must be between 0 and 2, got {self.temperature}")
+        if not (0 < self.compact_at <= 1 and 0 < self.compact_to < 1):
+            problems.append("compact_at and compact_to must be numbers between 0 and 1")
         if self.backend == "ollama" and self.context_limit > self.num_ctx:
             # Ollama silently drops the start of a prompt longer than num_ctx, so
             # compaction must trigger below it.

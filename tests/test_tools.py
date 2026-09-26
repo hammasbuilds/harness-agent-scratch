@@ -250,6 +250,18 @@ def test_quotes_and_pipes_survive_the_trip_to_the_shell(cfg, allow, workspace):
 
 
 @needs_posix_shell
+def test_a_background_process_is_stopped_not_waited_on(cfg, allow, workspace):
+    box = Toolbox(cfg, allow, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    start = time.time()
+    out = run(box, "bash", command="(sleep 30; echo late > late.txt) & echo started")
+    elapsed = time.time() - start
+    assert out.startswith("started\n[exit code 0]") and "background process it started was stopped" in out
+    assert elapsed < 8  # was two 5-second waits, and the process kept running
+    time.sleep(1)
+    assert not (workspace / "late.txt").exists()
+
+
+@needs_posix_shell
 def test_bash_runs_in_the_workspace(box, workspace):
     out = run(box, "bash", command="pwd")
     assert out.splitlines()[0].rstrip("/").lower().endswith(workspace.name.lower())
@@ -383,6 +395,15 @@ def test_utf16_big_endian_round_trips_byte_for_byte(box, workspace):
 
 
 # ---- guarded files ------------------------------------------------------------
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drops trailing dots and spaces from names")
+@pytest.mark.parametrize("path", [".env.", ".agents./skills/x/SKILL.md", ".harness./x", "notes.txt ", ".git./hooks/x"])
+def test_windows_name_aliases_cannot_slip_past_the_guards(box, workspace, deny, path):
+    out = run(box, "write_file", path=path, content="planted")
+    assert out.startswith("error:") and "dot or space" in out
+    assert not any(workspace.iterdir())
+    assert deny.asked == []
+
 
 def test_git_folders_are_blocked_at_any_depth(box, workspace):
     assert "inside .git/" in run(box, "write_file", path="vendor/lib/.git/hooks/pre-commit", content="x")

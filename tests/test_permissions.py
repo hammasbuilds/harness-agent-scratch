@@ -169,6 +169,30 @@ def test_cmd_shell_is_classified_conservatively(command):
     assert classify(command, cmd_shell=True) == ASK
 
 
+@pytest.mark.parametrize("command", [r"dir ..\..", r"dir \\attacker.example\share", "dir ../..", "dir sub\\..\\.."])
+def test_cmd_backslashes_and_parent_paths_ask(command, tmp_path):
+    # POSIX shlex drops backslashes, so `..\..` once reached the path check as `....`
+    assert classify(command, tmp_path, cmd_shell=True) == ASK
+
+
+@pytest.mark.parametrize("command", ["wc -c --files0-from=list.txt", "du --files0-from list.txt", "wc --files0=x"])
+def test_reading_file_names_from_a_file_asks(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+@pytest.mark.parametrize("config", [
+    "[core]\n\tfsmonitor = ./evil.sh\n", "[diff]\n\texternal = ./evil.sh\n",
+    '[diff "bin"]\n\ttextconv = ./evil.sh\n', "[core]\n\tpager = ./evil.sh\n", "[include]\n\tpath = ../x\n",
+])
+def test_git_asks_when_the_repository_config_can_run_programs(tmp_path, config):
+    ws = tmp_path.resolve()
+    (ws / ".git").mkdir()
+    (ws / ".git" / "config").write_text(config)
+    assert classify("git status", ws) == ASK
+    (ws / ".git" / "config").write_text("[core]\n\tbare = false\n\tautocrlf = input\n")
+    assert classify("git status", ws) == ALLOW
+
+
 def test_plain_commands_still_run_under_cmd():
     assert classify("dir", cmd_shell=True) == ALLOW
     assert classify("type notes.txt", cmd_shell=True) == ASK  # `type` is not on the list
