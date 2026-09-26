@@ -55,8 +55,6 @@ class Printer:
             p(c("33", f"  [compacted the transcript: ~{before} -> ~{after} tokens]"))
         elif kind == "squeezed":
             p(c("33", f"  [cut this turn's tool outputs to fit: ~{data[0]} tokens, budget {data[1]}]"))
-        elif kind == "overflow":
-            p(c("31", f"  [warning: ~{data[0]} tokens is over the {data[1]}-token context; the model will not see all of it]"))
 
 
 def ask_user(question: str) -> bool:

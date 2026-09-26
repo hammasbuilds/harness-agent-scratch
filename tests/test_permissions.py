@@ -193,6 +193,55 @@ def test_git_asks_when_the_repository_config_can_run_programs(tmp_path, config):
     assert classify("git status", ws) == ALLOW
 
 
+@pytest.mark.parametrize("command", [
+    "rg --color=always --hyperlink-format=file --hostname-bin=./evil.exe x src",  # ripgrep 14 runs it
+    "rg --hostname-bin sh x", "rg --hyperlink-format=default x",
+])
+def test_ripgrep_options_that_run_programs_ask(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+@pytest.mark.parametrize("folder", ["build", "dist", "node_modules/pkg", ".venv", "__pycache__"])
+def test_secrets_in_build_and_dependency_folders_still_count(box_ws, folder):
+    (box_ws / folder).mkdir(parents=True)
+    (box_ws / folder / ".env").write_text("HARNESS_API_KEY=sk")
+    assert classify("grep -r API_KEY .", box_ws) == ASK  # grep does not skip these folders
+
+
+@pytest.mark.parametrize("config", [
+    '[diff "x"]\n\tcommand = ./evil.sh\n',  # with a .gitattributes the model can write
+    "[gpg]\n\tprogram = ./evil.sh\n[log]\n\tshowSignature = true\n",
+    "[extensions]\n\tworktreeConfig = true\n",
+    "[core]\n\tbare = false\n\tsshCommand = ./evil.sh\n",
+    "[alias]\n\tst = !./evil.sh\n",
+    "not a config line\n",
+])
+def test_git_config_is_an_allowlist_of_plain_clone_keys(tmp_path, config):
+    ws = tmp_path.resolve()
+    (ws / ".git").mkdir()
+    (ws / ".git" / "config").write_text(config)
+    assert classify("git log", ws) == ASK
+
+
+def test_a_worktree_config_file_makes_git_ask(tmp_path):
+    ws = tmp_path.resolve()
+    (ws / ".git").mkdir()
+    (ws / ".git" / "config").write_text("[core]\n\tbare = false\n")
+    (ws / ".git" / "config.worktree").write_text("[core]\n\tfsmonitor = ./evil.sh\n")
+    assert classify("git status", ws) == ASK
+
+
+def test_a_real_clone_config_passes(tmp_path):
+    ws = tmp_path.resolve()
+    (ws / ".git").mkdir()
+    (ws / ".git" / "config").write_text(
+        "[core]\n\trepositoryformatversion = 0\n\tfilemode = false\n\tbare = false\n\tlogallrefupdates = true\n"
+        "\tsymlinks = false\n\tignorecase = true\n"
+        '[remote "origin"]\n\turl = https://github.com/owner/repo.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n'
+        '[branch "main"]\n\tremote = origin\n\tmerge = refs/heads/main\n')
+    assert classify("git log --oneline -5", ws) == ALLOW
+
+
 def test_plain_commands_still_run_under_cmd():
     assert classify("dir", cmd_shell=True) == ALLOW
     assert classify("type notes.txt", cmd_shell=True) == ASK  # `type` is not on the list

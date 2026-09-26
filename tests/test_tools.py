@@ -297,6 +297,16 @@ def test_urls_carrying_a_password_are_scrubbed_whatever_their_name():
 
 
 @needs_posix_shell
+def test_python_children_write_utf8_that_arrives_intact(cfg, allow, workspace):
+    import sys
+    box = Toolbox(cfg, allow, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    (workspace / "u.py").write_text("print(chr(233), chr(10003), chr(0x1F41B))\n", encoding="utf-8")
+    py = Path(sys.executable).as_posix()
+    out = run(box, "bash", command=f'"{py}" u.py')
+    assert out == "é ✓ 🐛\n[exit code 0]"  # was U+FFFD, and ✓ crashed the child on Windows
+
+
+@needs_posix_shell
 def test_colour_codes_are_stripped(box):
     assert run(box, "bash", command=r"printf '\033[31mred\033[0m plain'") == "red plain\n[exit code 0]"
 

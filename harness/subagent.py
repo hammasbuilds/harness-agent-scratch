@@ -57,7 +57,14 @@ def run_subagent(prompt: str, *, llm: LLM, toolbox: Toolbox, max_steps: int, con
         if schema_tokens + estimate_tokens(messages) > TRIM_AT * context_limit:
             _trim_older_outputs(messages)
         if schema_tokens + estimate_tokens(messages) > FINISH_AT * context_limit:
-            reply = llm.chat([*messages, {"role": "user", "content": OUT_OF_ROOM}], None)
+            final = [*messages, {"role": "user", "content": OUT_OF_ROOM}]
+            if estimate_tokens(final) > context_limit:
+                # Even the answer-now request would not fit (a huge prompt, say);
+                # Ollama would cut it silently, so do not send it.
+                on_event("subagent_end", None)
+                return ("(the subagent could not continue: its context is full even after trimming; "
+                        "give it a shorter, more specific prompt)")
+            reply = llm.chat(final, None)
             return _finish(reply.content, on_event)
         reply = llm.chat(messages, schemas)
         messages.append(reply.to_message())

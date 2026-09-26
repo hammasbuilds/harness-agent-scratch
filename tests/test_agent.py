@@ -226,7 +226,7 @@ def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_ag
     agent.send("read them all")
     second_request, tools = llm.requests[1]
     assert estimate_tokens(second_request) + estimate_tokens(tools) <= cfg.compact_at * cfg.context_limit
-    assert "squeezed" in events and "overflow" not in events
+    assert "squeezed" in events  # and no ContextOverflow: the request fit after squeezing
     outputs = [m["content"] for m in agent.messages if m["role"] == "tool"]
     assert outputs[0].endswith("removed to fit the context]")  # oldest cut first
     assert outputs[-1] == "7" * 2400  # the latest kept whole while it fits
@@ -325,6 +325,15 @@ def test_git_is_asked_once_per_step(make_agent, monkeypatch):
     llm = ScriptedLLM([Reply("", [call("bash", command="pwd")]), Reply("", [call("bash", command="ls")]), Reply("ok")])
     make_agent(llm).send("go")
     assert len(calls) == 3  # one per model call, however many token estimates each step makes
+
+
+def test_a_subagent_prompt_too_big_to_answer_is_not_sent(cfg, make_agent):
+    llm = GreedySubagentModel()
+    agent = make_agent(llm)
+    cfg.context_limit = 4000
+    result = agent._subagent("x" * 30_000)
+    assert "could not continue" in result
+    assert llm.sub_requests == []  # the ~10k-token request was once sent to an 8k context
 
 
 def test_spill_files_are_removed_when_the_turn_ends(cfg, make_agent, workspace):

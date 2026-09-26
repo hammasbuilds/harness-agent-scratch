@@ -97,6 +97,13 @@ def scrubbed_env(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if not _SECRET_NAME.search(k) and not _URL_WITH_PASSWORD.search(v)}
 
 
+def command_env(env: Mapping[str, str]) -> dict[str, str]:
+    """The environment a command runs with: no credentials, and Python children
+    told to write UTF-8. Output is read as UTF-8, but on Windows Python writes the
+    ANSI code page to a pipe: "é" arrived as U+FFFD and "✓" crashed the child."""
+    return {**scrubbed_env(env), "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
+
 def printable(text: str) -> str:
     """Show control characters as escapes, so a prompt shows what will run."""
     return _UNPRINTABLE.sub(lambda m: m.group().encode("unicode_escape").decode("ascii"), text)
@@ -501,7 +508,7 @@ class Toolbox:
                  else {"start_new_session": True})
         proc = subprocess.Popen(argv, cwd=self.workspace, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                env=scrubbed_env(os.environ), **group)
+                                env=command_env(os.environ), **group)
         job = _contain(proc)
         out_cap, err_cap = _Capture(proc.stdout), _Capture(proc.stderr)
         try:

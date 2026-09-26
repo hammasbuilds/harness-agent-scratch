@@ -17,6 +17,11 @@ def test_estimate_is_pessimistic():
     assert estimate_tokens(msgs) > 3000 / 4  # a real tokenizer gives ~750 here
 
 
+def test_estimate_is_pessimistic_for_non_latin_text_too():
+    msgs = [{"role": "user", "content": "字" * 4000}]
+    assert estimate_tokens(msgs) >= 4000  # tokenizers give about one token per CJK character; chars/3 gave 1,343
+
+
 def test_cut_lands_on_a_user_message_and_fits():
     msgs = turn(1) + turn(2) + turn(3) + turn(4)
     keep = estimate_tokens(turn(4)) + 5

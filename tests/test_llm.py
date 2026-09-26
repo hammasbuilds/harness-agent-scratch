@@ -113,7 +113,8 @@ def test_make_llm_picks_backend(tmp_path):
 @pytest.mark.parametrize("content", [
     '{"name": "bash", "arguments": {"command": "ls"}}',
     '```json\n{"name": "bash", "arguments": {"command": "ls"}}\n```',
-    'Sure.\n<tool_call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</tool_call>',
+    '<tool_call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</tool_call>',
+    '\n  <tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>\n',
 ])
 def test_inline_tool_calls_are_recovered(content):
     calls = extract_inline_tool_calls(content, {"bash"})
@@ -125,6 +126,9 @@ def test_inline_tool_calls_are_recovered(content):
     '{"name": "rm_everything", "arguments": {}}',  # not a known tool
     '{"name": "bash", "arguments": "ls"}',  # arguments not an object
     "{not json}",
+    # a tagged block quoted in prose is an example, not a call (it was once run)
+    'Never do this: <tool_call>{"name": "bash", "arguments": {"command": "rm -rf build"}}</tool_call> ok?',
+    'Sure.\n<tool_call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</tool_call>',
 ])
 def test_prose_and_unknown_tools_are_not_calls(content):
     assert extract_inline_tool_calls(content, {"bash"}) == []
@@ -338,6 +342,21 @@ def test_non_json_body_is_an_llm_error(monkeypatch):
     fake_connection(monkeypatch, response=FakeResponse(b"<html>502 Bad Gateway</html>"))
     with pytest.raises(LLMError, match="did not return usable JSON"):
         http_post_json("http://x/api/chat", {}, {}, 1)
+
+
+def test_an_integer_past_pythons_digit_limit_is_an_llm_error(monkeypatch):
+    fake_connection(monkeypatch, response=FakeResponse(b'{"eval_count": 1' + b"0" * 5000 + b"}"))
+    with pytest.raises(LLMError, match="did not return usable JSON"):
+        http_post_json("http://x/api/chat", {}, {}, 1)
+
+
+def test_a_proxy_without_a_port_gets_its_own_schemes_default(monkeypatch):
+    from harness.llm import _connection
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {"https": "http://proxy.example"})
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
+    conn, target = _connection("https://openrouter.ai/api/v1/chat/completions", 5)
+    assert (conn.host, conn.port) == ("proxy.example", 80)  # was 443, the target's default
+    assert type(conn) is http.client.HTTPConnection and target == "/api/v1/chat/completions"
 
 
 def test_deeply_nested_json_is_an_llm_error_not_a_recursion_crash(monkeypatch):

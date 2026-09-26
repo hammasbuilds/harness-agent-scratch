@@ -126,8 +126,10 @@ def _connection(url: str, timeout: float) -> tuple[http.client.HTTPConnection, s
     proxy = urllib.request.getproxies().get(parts.scheme)
     if proxy and not urllib.request.proxy_bypass(parts.hostname):
         p = urllib.parse.urlsplit(proxy if "://" in proxy else f"http://{proxy}")
-        conn = http.client.HTTPConnection(p.hostname, p.port or 80, timeout=timeout) if parts.scheme == "http" \
-            else http.client.HTTPSConnection(p.hostname, p.port or 443, timeout=timeout)
+        # The proxy's own scheme decides how to talk to it and its default port;
+        # an HTTPS target through an http:// proxy is a CONNECT over plain HTTP.
+        proxy_cls = http.client.HTTPSConnection if p.scheme == "https" else http.client.HTTPConnection
+        conn = proxy_cls(p.hostname, p.port or (443 if p.scheme == "https" else 80), timeout=timeout)
         if parts.scheme == "https":
             conn.set_tunnel(parts.hostname, port)
         else:
@@ -192,7 +194,8 @@ def http_post_json(url: str, body: dict, headers: dict, timeout: float) -> dict:
                        retryable=status in RETRY_STATUS, retry_after=_retry_after(reply_headers))
     try:
         return json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
+    # ValueError also covers an integer longer than Python's 4,300-digit limit.
+    except (ValueError, RecursionError) as e:
         raise LLMError(f"{url} did not return usable JSON ({type(e).__name__}): {raw[:300]!r}") from None
 
 
@@ -209,6 +212,8 @@ def extract_inline_tool_calls(content: str, known: set[str]) -> list[ToolCall]:
     JSON in prose is never mistaken for a call.
     """
     candidates = _TAGGED_CALL.findall(content)
+    if candidates and _TAGGED_CALL.sub("", content).strip():
+        return []  # <tool_call> blocks inside prose are quoted examples, not calls
     if not candidates:
         text = content.strip()
         fenced = _FENCED.fullmatch(text)

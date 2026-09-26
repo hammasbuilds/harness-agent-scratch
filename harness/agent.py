@@ -8,9 +8,10 @@ The request is laid out so that the start never changes between calls:
     [system prompt (fixed for the session)] [transcript, append-only] [reminder]
 
 Everything that varies (date, todos, stale files) sits in the reminder at the end
-and is never stored. The two deliberate exceptions are rare: compaction rewrites
-the start once when the context fills, and old tool outputs are trimmed once
-when a new user turn begins.
+and is never stored. Three deliberate exceptions change earlier messages, each
+rarely: compaction rewrites the start once when the context fills; old tool
+outputs are trimmed once when a new user turn begins; and when the current turn
+alone outgrows the budget, its tool outputs and finished call arguments are cut.
 """
 
 from __future__ import annotations

@@ -46,18 +46,30 @@ GIT_READ_ONLY = {"status", "log", "diff", "show", "rev-parse", "ls-files", "blam
 # matched by prefix, since git accepts `--outp` for `--output`.
 UNSAFE_FLAGS = {
     "find": {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"},
-    "rg": {"--pre", "--pre-glob", "--search-zip", "-z"},
+    # ripgrep 14: --hostname-bin runs a program to name the host in hyperlinks.
+    "rg": {"--pre", "--pre-glob", "--search-zip", "-z", "--hostname-bin", "--hyperlink-format"},
     "git": {"--output", "--ext-diff", "--textconv", "--exec", "--upload-pack", "--open-files-in-pager", "-O"},
     # Read the names of the files to read from another file, which the model can
     # write without asking and fill with paths outside the workspace.
     "wc": {"--files0-from"},
     "du": {"--files0-from"},
 }
-# A repository's own config can make read-only git commands run programs:
-# diff.external on diff/log -p/show, core.fsmonitor on status, textconv filters,
-# a pager. The model cannot write .git, but an unpacked archive can bring one.
-_GIT_CONFIG_RISK = re.compile(r"fsmonitor|external|textconv|pager|include|\bfilter\b|sshcommand|askpass",
-                              re.I)
+# A repository's own config can make read-only git commands run programs
+# (diff.external, diff.<driver>.command, core.fsmonitor, gpg.program with
+# log.showSignature, textconv, a pager, ...). The model cannot write .git, but an
+# unpacked archive can bring one. A list of dangerous keys missed three of them,
+# so this is the keys a plain `git init`/`git clone` writes, and nothing else.
+_GIT_PLAIN_KEYS = {
+    "core": {"repositoryformatversion", "filemode", "bare", "logallrefupdates", "symlinks", "ignorecase",
+             "autocrlf", "eol", "safecrlf", "precomposeunicode", "longpaths", "quotepath", "checkstat"},
+    "remote": {"url", "pushurl", "fetch", "tagopt", "prune", "promisor", "partialclonefilter"},
+    "branch": {"remote", "merge", "rebase", "pushremote", "description"},
+    "user": {"name", "email"},
+    "init": {"defaultbranch"},
+    "lfs": {"repositoryformatversion"},
+}
+_GIT_SECTION = re.compile(r'^\[\s*([A-Za-z0-9.-]+)(?:\s+"[^"]*")?\s*\]\s*$')
+_GIT_KEY = re.compile(r"^([A-Za-z][A-Za-z0-9-]*)\s*(=|$)")
 RECURSIVE = {"grep": "rR", "egrep": "rR", "fgrep": "rR", "diff": "r"}  # short letters meaning "recurse"
 NEVER_NAMES = re.compile(r"^(mkfs(\.\w+)?|shutdown|reboot|halt|poweroff|diskpart|format)$")
 NEVER_RAW = [
@@ -80,7 +92,9 @@ _SECRET_FILE = re.compile(
 # No backslashes (POSIX shlex would drop them, hiding `..\..` and `\\host\share`)
 # and no `..` at all.
 _CMD_PLAIN = re.compile(r"(dir|echo)( [\w.\-/]+)*")
-_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".harness", ".tox", "dist", "build"}
+# Only these are left out of the scan: grep -r does not skip build/, dist/ or
+# node_modules, so a .env in any of them must count.
+_SKIP_DIRS = {".git", ".harness"}
 _SCAN_LIMIT = 50_000
 
 
@@ -237,17 +251,31 @@ def _repo_is_workspace(workspace: Path) -> bool:
 
 
 def _repo_config_is_plain(workspace: Path) -> bool:
-    """False if the repository's config sets anything that runs a program."""
+    """True only if every key in the repository's config is one a plain clone writes."""
     git = workspace / ".git"
     if git.is_file():
         return False  # a gitdir pointer: the real config lives elsewhere
-    config = git / "config"
+    if (git / "config.worktree").exists():
+        return False  # read when extensions.worktreeConfig is set
     try:
-        return not _GIT_CONFIG_RISK.search(config.read_text(encoding="utf-8", errors="replace"))
+        text = (git / "config").read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
         return True
     except OSError:
         return False
+    section = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        header = _GIT_SECTION.match(line)
+        if header:
+            section = header.group(1).lower()
+            continue
+        key = _GIT_KEY.match(line)
+        if not key or section is None or key.group(1).lower() not in _GIT_PLAIN_KEYS.get(section, set()):
+            return False  # unknown key, unknown section, or a line this parser cannot read
+    return True
 
 
 def _git_ok(args: list[str], workspace: Path | None) -> bool:

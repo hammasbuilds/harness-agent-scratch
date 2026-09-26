@@ -23,9 +23,13 @@ TOOL_EXCERPT = 1500
 
 
 def estimate_tokens(messages: list[dict]) -> int:
-    """About three characters per token: deliberately pessimistic, because
-    underestimating means Ollama silently drops the start of the prompt."""
-    return sum(len(json.dumps(m, ensure_ascii=False)) for m in messages) // 3
+    """Three ASCII characters per token, and one token per other character:
+    deliberately pessimistic, because underestimating means Ollama silently
+    drops the start of the prompt. (A flat chars/3 put 4,000 CJK characters at
+    1,343 tokens; real tokenizers give about one per character.)"""
+    text = "".join(json.dumps(m, ensure_ascii=False) for m in messages)
+    wide = sum(1 for ch in text if ord(ch) > 127)
+    return (len(text) - wide) // 3 + wide
 
 
 def choose_cut(messages: list[dict], keep_tokens: int) -> int:
