@@ -25,17 +25,21 @@ def test_cut_lands_on_a_user_message_and_fits():
     assert estimate_tokens(msgs[cut:]) <= keep
 
 
-def test_cut_never_starts_with_a_tool_result():
-    # One huge turn: no user boundary fits, so it falls back to a non-tool message.
+def test_the_current_turn_is_never_cut():
+    # One huge turn and nothing older: compaction must not summarise away the
+    # user's own request (it once did, cutting at the first assistant message).
     msgs = [{"role": "user", "content": "go"}]
     for n in range(6):
         msgs += turn(n)[1:3]
-    msgs.append({"role": "assistant", "content": "end"})
-    cut = choose_cut(msgs, keep_tokens=200)
-    assert msgs[cut]["role"] != "tool"
-    for i, m in enumerate(msgs[cut:]):
-        if m["role"] == "tool":  # its call is kept too
-            assert any(tc["id"] == m["tool_call_id"] for prev in msgs[cut:cut + i] for tc in prev.get("tool_calls") or [])
+    assert choose_cut(msgs, keep_tokens=200) == 0
+
+
+def test_when_the_current_turn_alone_is_too_big_all_older_turns_go():
+    msgs = turn(1) + turn(2) + [{"role": "user", "content": "q" * 3000}]
+    cut = choose_cut(msgs, keep_tokens=100)
+    assert msgs[cut]["content"] == "q" * 3000
+    assert all(m["role"] != "tool" or any(tc["id"] == m["tool_call_id"] for p in msgs[cut:]
+                                          for tc in p.get("tool_calls") or []) for m in msgs[cut:])
 
 
 def test_cut_zero_when_nothing_can_go():
@@ -65,8 +69,23 @@ def test_compact_summarises_the_dropped_part():
     assert kept == turn(3)
     sent, tools = llm.requests[0]
     assert tools is None
-    assert sent[0] == {"role": "system", "content": COMPACT_SYSTEM}
+    assert sent[0]["content"].startswith(COMPACT_SYSTEM) and "Keep the note under" in sent[0]["content"]
     assert "task 1" in sent[1]["content"] and "task 3" not in sent[1]["content"]
+
+
+def test_long_notes_are_capped_so_repeated_compactions_cannot_grow_without_bound():
+    llm = ScriptedLLM([Reply("n" * 10_000)])
+    note, _ = compact(turn(1) + turn(2), "", llm, keep_tokens=estimate_tokens(turn(2)) + 5,
+                      budget_chars=50_000, max_summary_chars=1000)
+    assert len(note) < 1100 and note.endswith("[note cut to fit the context]")
+
+
+def test_an_empty_note_keeps_an_excerpt_instead_of_losing_history():
+    llm = ScriptedLLM([Reply("")])
+    note, kept = compact(turn(1) + turn(2), "OLD", llm, keep_tokens=estimate_tokens(turn(2)) + 5,
+                         budget_chars=50_000)
+    assert "OLD" in note and "task 1" in note and "summary failed" in note
+    assert kept == turn(2)
 
 
 def test_compact_carries_the_previous_note_forward():

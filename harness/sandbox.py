@@ -5,8 +5,9 @@ question: "whatever runs, what can it touch?". A command the user approved
 still cannot write outside the workspace or reach the network.
 
 - Linux:   bubblewrap (`bwrap`): the whole filesystem read-only, the workspace
-           writable, a private /tmp, no network.
-- macOS:   `sandbox-exec` with a Seatbelt profile doing the same.
+           writable, private /tmp and /run, no network, own PID namespace.
+- macOS:   `sandbox-exec` with a Seatbelt profile: writes allowed only in the
+           workspace and the system temp folders, no network.
 - Windows: no equivalent ships with the OS, so commands run unconfined. Run
            the harness inside WSL (where bwrap works) or a container if that
            matters.
@@ -58,10 +59,16 @@ class Sandbox:
     def wrap(self, argv: list[str]) -> list[str]:
         if self.kind == "bwrap":
             ws = self.workspace
-            # Order matters: /tmp is replaced first, so a workspace under /tmp is
-            # bound back in afterwards and stays writable.
+            # A read-only / still lets a process connect() to Unix sockets: the
+            # D-Bus session bus (systemd-run --user) and docker.sock are both ways
+            # out, so /run is replaced by an empty tmpfs (/var/run links to it).
+            # --unshare-pid keeps commands from signalling host processes, such as
+            # a training job; --new-session blocks TIOCSTI keystroke injection.
+            # Order matters: /tmp and /run are replaced first, so a workspace under
+            # either is bound back in afterwards and stays writable.
             return ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-                    "--tmpfs", "/tmp", "--bind", ws, ws, "--unshare-net", "--die-with-parent",
+                    "--tmpfs", "/tmp", "--tmpfs", "/run", "--bind", ws, ws,
+                    "--unshare-net", "--unshare-pid", "--unshare-ipc", "--new-session", "--die-with-parent",
                     "--chdir", ws, *argv]
         if self.kind == "seatbelt":
             return ["sandbox-exec", "-p", SEATBELT_PROFILE, "-D", f"WORKSPACE={self.workspace}", *argv]
@@ -85,15 +92,22 @@ def find_shell(configured: str | None = None, system: str | None = None,
             return [configured, "/d", "/c"], "cmd.exe (Windows command syntax)"
         return [configured, "-c"], configured
     if system == "Windows":
-        program_files = [os.environ.get("ProgramFiles", r"C:\Program Files"),
-                         os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")]
-        for base in program_files:
-            candidate = ntpath.join(base, "Git", "bin", "bash.exe")  # Windows separators on any host
+        git_bash = "Git Bash (POSIX shell syntax; use forward slashes)"
+        roots = [ntpath.join(os.environ.get(v, d), "Git") for v, d in
+                 (("ProgramFiles", r"C:\Program Files"), ("ProgramFiles(x86)", r"C:\Program Files (x86)"))]
+        # Portable or per-user Git: find git.exe and look for bin\bash.exe beside it.
+        git = which("git")
+        if git:
+            parent = ntpath.dirname(ntpath.dirname(git))  # ...\cmd\git.exe or ...\bin\git.exe
+            roots += [parent, ntpath.dirname(parent)]     # ...\mingw64\bin\git.exe
+        for root in roots:
+            candidate = ntpath.join(root, "bin", "bash.exe")  # Windows separators on any host
             if exists(candidate):
-                return [candidate, "-c"], "Git Bash (POSIX shell syntax; use forward slashes)"
+                return [candidate, "-c"], git_bash
         found = which("bash")
-        # C:\Windows\System32\bash.exe is WSL: a different filesystem entirely.
-        if found and "system32" not in found.lower():
+        # System32\bash.exe and the WindowsApps alias are WSL: a different
+        # filesystem entirely, where the workspace paths do not exist.
+        if found and not any(s in found.lower() for s in ("system32", "windowsapps")):
             return [found, "-c"], "bash"
         return ["cmd.exe", "/d", "/c"], "cmd.exe (Windows command syntax)"
     found = which("bash")

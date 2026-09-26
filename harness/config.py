@@ -1,4 +1,4 @@
-"""Settings, read once from environment variables (and an optional .env file)."""
+"""Settings, read once from environment variables and .env files."""
 
 from __future__ import annotations
 
@@ -13,18 +13,41 @@ DEFAULT_BASE_URLS = {
 }
 
 
-def load_dotenv(path: Path, environ: dict | None = None) -> None:
-    """Fill unset variables from a KEY=VALUE file. Variables already set win."""
+# Settings that decide where requests go, what runs commands and what is
+# confined. A project's own .env (possibly from a cloned, untrusted repo, or
+# written by the model itself) must not be able to set these: a base URL there
+# would send the user's real API key to someone else's server.
+TRUSTED_ONLY = frozenset({
+    "HARNESS_BACKEND", "HARNESS_BASE_URL", "HARNESS_API_KEY",
+    "HARNESS_SHELL", "HARNESS_SANDBOX", "HARNESS_SKILLS_DIRS",
+})
+
+
+def user_config_file(env: Mapping[str, str]) -> Path:
+    return Path(env.get("HARNESS_CONFIG") or Path.home() / ".config" / "harness" / ".env")
+
+
+def load_dotenv(path: Path, environ: dict | None = None, skip: frozenset[str] = frozenset()) -> list[str]:
+    """Fill unset variables from a KEY=VALUE file. Variables already set win.
+
+    Keys in `skip` are not loaded; their names are returned so the caller can
+    say they were ignored.
+    """
     environ = os.environ if environ is None else environ
     if not path.is_file():
-        return
+        return []
+    skipped = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         key = key.strip().removeprefix("export ").strip()
+        if key in skip:
+            skipped.append(key)
+            continue
         environ.setdefault(key, value.strip().strip('"').strip("'"))
+    return skipped
 
 
 @dataclass
@@ -42,6 +65,7 @@ class Config:
     num_ctx: int = 8192
     keep_alive: str = "30m"  # keep the model loaded so its prompt cache survives between turns
     request_timeout: float = 900.0  # CPU inference is slow; one call can take minutes
+    retries: int = 2  # extra attempts after a rate limit, 5xx or dropped connection
     context_limit: int = 8192  # tokens the transcript may grow to before compaction
     compact_at: float = 0.85
     compact_to: float = 0.35
@@ -51,6 +75,19 @@ class Config:
     shell: str | None = None
     skills_dirs: list[Path] | None = None  # None = ~/.agents/skills and <workspace>/.agents/skills
     sandbox: str = "auto"  # auto | none | required
+
+    def __post_init__(self):
+        problems = []
+        if not 0 < self.compact_to < self.compact_at <= 1:
+            problems.append(f"need 0 < compact_to ({self.compact_to}) < compact_at ({self.compact_at}) <= 1")
+        for name, low in (("num_ctx", 512), ("context_limit", 512), ("output_cap", 200), ("max_steps", 1),
+                          ("subagent_max_steps", 1), ("num_thread", 1), ("retries", 0)):
+            if getattr(self, name) < low:
+                problems.append(f"{name} must be at least {low}, got {getattr(self, name)}")
+        if self.request_timeout <= 0:
+            problems.append("request_timeout must be positive")
+        if problems:
+            raise ValueError("invalid settings: " + "; ".join(problems))
 
     @classmethod
     def from_env(cls, workspace: Path, env: Mapping[str, str]) -> "Config":
@@ -83,6 +120,7 @@ class Config:
             num_ctx=num_ctx,
             keep_alive=get("KEEP_ALIVE", "30m"),
             request_timeout=number("REQUEST_TIMEOUT", 900.0, float),
+            retries=number("RETRIES", 2, int),
             # With Ollama the real ceiling is num_ctx; past it Ollama drops the
             # start of the prompt without telling anyone.
             context_limit=number("CONTEXT_LIMIT", num_ctx if backend == "ollama" else 64000, int),

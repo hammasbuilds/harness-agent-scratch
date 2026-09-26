@@ -41,6 +41,23 @@ def test_skills_dirs_env_is_an_override(tmp_path):
     assert Config.from_env(tmp_path, {}).skills_dirs is None
 
 
+@pytest.mark.parametrize("env, message", [
+    ({"HARNESS_NUM_CTX": "100"}, "num_ctx must be at least 512"),
+    ({"HARNESS_OUTPUT_CAP": "0"}, "output_cap"),
+    ({"HARNESS_MAX_STEPS": "0"}, "max_steps"),
+    ({"HARNESS_RETRIES": "-1"}, "retries"),
+    ({"HARNESS_REQUEST_TIMEOUT": "0"}, "request_timeout"),
+])
+def test_impossible_settings_fail_at_startup(tmp_path, env, message):
+    with pytest.raises(ValueError, match=message):
+        Config.from_env(tmp_path, env)
+
+
+def test_compaction_thresholds_must_be_ordered(tmp_path):
+    with pytest.raises(ValueError, match="compact_to"):
+        Config(workspace=tmp_path, compact_at=0.3, compact_to=0.5)
+
+
 def test_dotenv_fills_only_unset_variables(tmp_path):
     (tmp_path / ".env").write_text('# comment\nHARNESS_MODEL="qwen2.5:14b-instruct"\nexport HARNESS_NUM_GPU=3\nNOEQUALS\n')
     env = {"HARNESS_NUM_GPU": "0"}

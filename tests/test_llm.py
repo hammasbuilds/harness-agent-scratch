@@ -1,5 +1,8 @@
+import http.client
 import json
+import socket
 import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -188,6 +191,95 @@ def test_http_errors_carry_the_server_message(tmp_path, local_server):
         OllamaBackend(cfg(tmp_path, base_url=local_server, model="missing")).chat([{"role": "user", "content": "x"}], None)
 
 
-def test_unreachable_server_is_an_llm_error():
-    with pytest.raises(LLMError, match="cannot reach"):
-        http_post_json("http://127.0.0.1:9/api/chat", {}, {}, 2)
+def _closed_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_refused_connection_is_an_llm_error_and_not_retried():
+    with pytest.raises(LLMError, match="cannot reach") as err:
+        http_post_json(f"http://127.0.0.1:{_closed_port()}/api/chat", {}, {}, 5)
+    assert err.value.retryable is False  # the server is not running; retrying will not start it
+
+
+@pytest.mark.parametrize("error, retryable", [
+    (ConnectionResetError(10054, "reset"), True),
+    (http.client.RemoteDisconnected("gone"), True),
+    (http.client.IncompleteRead(b"par"), True),
+    (TimeoutError("read timed out"), False),
+])
+def test_network_failures_never_escape_as_raw_exceptions(monkeypatch, error, retryable):
+    def fail(*a, **k):
+        raise error
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    with pytest.raises(LLMError) as err:
+        http_post_json("http://x/api/chat", {}, {}, 1)
+    assert err.value.retryable is retryable
+
+
+def test_non_json_body_is_an_llm_error(monkeypatch):
+    class Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b"<html>502 Bad Gateway</html>"
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Resp())
+    with pytest.raises(LLMError, match="did not return JSON"):
+        http_post_json("http://x/api/chat", {}, {}, 1)
+
+
+class FlakyPost:
+    def __init__(self, failures, final):
+        self.failures = list(failures)
+        self.final = final
+        self.calls = 0
+
+    def __call__(self, url, body, headers, timeout):
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return self.final
+
+
+def test_transient_failures_are_retried_with_backoff(tmp_path):
+    post = FlakyPost([LLMError("503", retryable=True), LLMError("reset", retryable=True)],
+                     {"message": {"content": "finally"}})
+    waits = []
+    backend = OllamaBackend(cfg(tmp_path), post, sleep=waits.append)
+    assert backend.chat(HISTORY, None).content == "finally"
+    assert post.calls == 3 and waits == [1, 3]
+
+
+def test_retries_give_up_and_permanent_errors_fail_at_once(tmp_path):
+    post = FlakyPost([LLMError("503", retryable=True)] * 5, {})
+    with pytest.raises(LLMError, match="503"):
+        OllamaBackend(cfg(tmp_path, retries=2), post, sleep=lambda s: None).chat(HISTORY, None)
+    assert post.calls == 3
+    post = FlakyPost([LLMError("HTTP 401", retryable=False)], {})
+    with pytest.raises(LLMError, match="401"):
+        OllamaBackend(cfg(tmp_path), post, sleep=lambda s: None).chat(HISTORY, None)
+    assert post.calls == 1
+
+
+def test_http_status_decides_retryability(tmp_path, local_server):
+    with pytest.raises(LLMError) as err:
+        OllamaBackend(cfg(tmp_path, base_url=local_server, model="missing"), sleep=lambda s: None).chat(
+            [{"role": "user", "content": "x"}], None)
+    assert err.value.retryable is False  # 404: asking again will not help
+
+
+def test_truncated_replies_are_flagged(tmp_path):
+    ollama = OllamaBackend(cfg(tmp_path), FakePost({"message": {"content": "half"}, "done_reason": "length"}))
+    assert ollama.chat(HISTORY, None).truncated is True
+    openai = OpenAIBackend(cfg(tmp_path, backend="openai"),
+                           FakePost({"choices": [{"message": {"content": "half"}, "finish_reason": "length"}]}))
+    assert openai.chat(HISTORY, None).truncated is True
+    done = OllamaBackend(cfg(tmp_path), FakePost({"message": {"content": "all"}, "done_reason": "stop"}))
+    assert done.chat(HISTORY, None).truncated is False
+
+
+def test_openai_content_as_typed_parts(tmp_path):
+    post = FakePost({"choices": [{"message": {"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}}]})
+    assert OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, None).content == "ab"

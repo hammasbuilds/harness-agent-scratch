@@ -36,19 +36,26 @@ def git_summary(workspace: Path) -> str | None:
     return f"branch {branch}" + (f", last commit {head}" if head else ", no commits yet")
 
 
-def stale_files(seen: dict[Path, float]) -> list[Path]:
-    """Files whose modification time moved since the agent last read or wrote them."""
+def fingerprint(path: Path) -> tuple[int, int]:
+    """(mtime in nanoseconds, size). The size catches a rewrite that lands in the
+    same mtime tick, which on coarse filesystems a float mtime alone misses."""
+    st = path.stat()
+    return st.st_mtime_ns, st.st_size
+
+
+def stale_files(seen: dict[Path, tuple[int, int]]) -> list[Path]:
+    """Files that changed or vanished since the agent last read or wrote them."""
     stale = []
-    for path, mtime in seen.items():
+    for path, known in seen.items():
         try:
-            if path.stat().st_mtime != mtime:
+            if fingerprint(path) != known:
                 stale.append(path)
-        except FileNotFoundError:
+        except OSError:
             stale.append(path)
     return stale
 
 
-def build_reminder(*, workspace: Path, todos: TodoList, seen: dict[Path, float],
+def build_reminder(*, workspace: Path, todos: TodoList, seen: dict[Path, tuple[int, int]],
                    today: date, git: str | None) -> str:
     lines = ["<system-reminder>",
              "Context from the harness, not a message from the user.",

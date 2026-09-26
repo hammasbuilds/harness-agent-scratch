@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .agent import Agent
-from .config import Config, load_dotenv
+from .config import TRUSTED_ONLY, Config, load_dotenv, user_config_file
 from .llm import LLMError, make_llm
 from .sandbox import SandboxUnavailable
 
@@ -45,6 +45,10 @@ class Printer:
         elif kind == "compacted":
             before, after = data
             p(c("33", f"  [compacted the transcript: ~{before} -> ~{after} tokens]"))
+        elif kind == "squeezed":
+            p(c("33", f"  [cut this turn's tool outputs to fit: ~{data[0]} tokens, budget {data[1]}]"))
+        elif kind == "overflow":
+            p(c("31", f"  [warning: ~{data[0]} tokens is over the {data[1]}-token context; the model will not see all of it]"))
 
 
 def ask_user(question: str) -> bool:
@@ -68,9 +72,16 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def build_config(args: argparse.Namespace, env: dict) -> Config:
+def build_config(args: argparse.Namespace, env: dict, warn=lambda msg: print(msg, file=sys.stderr)) -> Config:
+    """Settings, strongest first: command-line flags, the real environment, the
+    user's own config file, then the workspace .env for everything except
+    TRUSTED_ONLY settings (where requests go, what runs, what is confined)."""
     workspace = Path(args.workspace).resolve()
-    load_dotenv(workspace / ".env", env)
+    load_dotenv(user_config_file(env), env)
+    ignored = load_dotenv(workspace / ".env", env, skip=TRUSTED_ONLY)
+    if ignored:
+        warn(f"warning: ignored {', '.join(ignored)} from {workspace / '.env'}; a project's .env may not set "
+             f"these. Put them in {user_config_file(env)} or the environment.")
     if args.backend:
         env["HARNESS_BACKEND"] = args.backend
     cfg = Config.from_env(workspace, env)

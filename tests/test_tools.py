@@ -86,7 +86,7 @@ def test_writes_outside_the_workspace_are_refused(box, workspace, tmp_path):
 def test_reading_outside_the_workspace_asks(box, tmp_path, deny):
     (tmp_path / "secret.txt").write_text("s")
     assert run(box, "read_file", path=str(tmp_path / "secret.txt")) == \
-        "error: the user declined reading a file outside the workspace"
+        "error: reading a file outside the workspace was not approved"
     assert deny.asked and "secret.txt" in deny.asked[0]
 
 
@@ -246,7 +246,197 @@ def test_bash_runs_in_the_workspace(box, workspace):
     assert out.splitlines()[0].rstrip("/").lower().endswith(workspace.name.lower())
 
 
+@needs_posix_shell
+def test_secrets_are_not_in_the_commands_environment(cfg, allow, workspace, monkeypatch):
+    # `$` makes the command ask; even when the user says yes, the secrets are not there.
+    box = Toolbox(cfg, allow, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    monkeypatch.setenv("HARNESS_API_KEY", "sk-live-123")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_456")
+    monkeypatch.setenv("DB_PASSWORD", "hunter2")
+    monkeypatch.setenv("HARNESS_MODEL", "keep-me")
+    out = run(box, "bash", command="echo k=$HARNESS_API_KEY t=$GITHUB_TOKEN p=$DB_PASSWORD m=$HARNESS_MODEL")
+    assert out == "k= t= p= m=keep-me\n[exit code 0]"
+
+
+@pytest.mark.parametrize("name, secret", [
+    ("OPENROUTER_API_KEY", True), ("AWS_SECRET_ACCESS_KEY", True), ("GH_TOKEN", True), ("KEY", True),
+    ("PGPASSWORD", False), ("PATH", False), ("KEYBOARD_LAYOUT", False), ("SSH_AUTH_SOCK", False),
+    ("MONKEY_BUSINESS", False),
+])
+def test_secret_name_detection(name, secret):
+    from harness.tools import scrubbed_env
+    assert (name not in scrubbed_env({name: "v"})) is secret
+
+
+@needs_posix_shell
+def test_colour_codes_are_stripped(box):
+    assert run(box, "bash", command=r"printf '\033[31mred\033[0m plain'") == "red plain\n[exit code 0]"
+
+
+def test_binary_files_are_refused(box, workspace):
+    (workspace / "img.png").write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR" + bytes(100))
+    assert run(box, "read_file", path="img.png").startswith("error: img.png is a binary file")
+
+
+def test_huge_files_are_refused_before_reading(box, workspace, monkeypatch):
+    monkeypatch.setattr("harness.tools.MAX_READ_BYTES", 1000)
+    (workspace / "log.txt").write_text("x" * 5000)
+    out = run(box, "read_file", path="log.txt")
+    assert out.startswith("error: log.txt is 5,000 bytes") and "grep" in out
+
+
+def test_git_internals_are_not_writable(box, workspace):
+    (workspace / ".git" / "hooks").mkdir(parents=True)
+    assert "inside .git/" in run(box, "write_file", path=".git/hooks/pre-commit", content="rm -rf ~")
+    assert not (workspace / ".git" / "hooks" / "pre-commit").exists()
+    assert run(box, "write_file", path=".gitignore", content="x").startswith("wrote")  # only the folder
+
+
+@pytest.mark.parametrize("args, expected", [
+    ({"path": "f.txt", "content": 5}, "content must be string"),
+    ({"path": ["f.txt"], "content": "x"}, "path must be string"),
+])
+def test_argument_types_are_checked(box, args, expected):
+    assert expected in box.call("write_file", json.dumps(args))
+
+
+def test_numeric_strings_are_accepted_for_integers(box, workspace):
+    (workspace / "f.txt").write_text("a\nb\nc")
+    assert run(box, "read_file", path="f.txt", offset="2", limit="1") == "b\n[lines 2-2 of 3]"
+
+
+# ---- encodings and line endings ---------------------------------------------
+
+def test_latin1_file_survives_an_edit_byte_for_byte(box, workspace):
+    f = workspace / "legacy.py"
+    f.write_bytes("name = 'café'\nx = 1\n".encode("latin-1"))
+    assert "café" in run(box, "read_file", path="legacy.py")
+    assert run(box, "str_replace", path="legacy.py", old_string="x = 1", new_string="x = 2").startswith("replaced")
+    assert f.read_bytes() == "name = 'café'\nx = 2\n".encode("latin-1")
+
+
+def test_latin1_file_refuses_characters_it_cannot_hold(box, workspace):
+    f = workspace / "legacy.txt"
+    f.write_bytes("café\n".encode("latin-1"))
+    run(box, "read_file", path="legacy.txt")
+    out = run(box, "str_replace", path="legacy.txt", old_string="café", new_string="咖啡")
+    assert "stored as latin-1" in out
+    assert f.read_bytes() == "café\n".encode("latin-1")
+
+
+@pytest.mark.parametrize("encoding, bom", [("utf-16", b""), ("utf-8-sig", b"")])
+def test_bom_files_keep_their_encoding(box, workspace, encoding, bom):
+    f = workspace / "ps.txt"
+    f.write_bytes("line one\r\nline two\r\n".encode(encoding))
+    assert run(box, "read_file", path="ps.txt") == "line one\nline two\n"  # UTF-16 has NULs but is text
+    run(box, "str_replace", path="ps.txt", old_string="two", new_string="2")
+    assert f.read_bytes() == "line one\r\nline 2\r\n".encode(encoding)
+
+
+def test_write_file_does_not_double_carriage_returns(box, workspace):
+    f = workspace / "win.txt"
+    f.write_bytes(b"old\r\n")
+    run(box, "read_file", path="win.txt")
+    run(box, "write_file", path="win.txt", content="a\r\nb\r\n")
+    assert f.read_bytes() == b"a\r\nb\r\n"
+
+
+# ---- guarded files ------------------------------------------------------------
+
+@pytest.mark.parametrize("path", [".env", "config/.env.local", ".agents/skills/x/SKILL.md", ".harness/notes.txt",
+                                  "certs/server.pem"])
+def test_files_that_configure_the_harness_or_hold_secrets_need_a_yes(box, workspace, deny, path):
+    out = run(box, "write_file", path=path, content="HARNESS_BASE_URL=https://attacker.example")
+    assert out == f"error: changing {path} was not approved"
+    assert not (workspace / path).exists()
+    assert deny.asked == [f"change {path} (it configures the harness or holds credentials)"]
+
+
+def test_guarded_write_goes_ahead_when_approved(cfg, allow, workspace):
+    box = Toolbox(cfg, allow, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    assert run(box, "write_file", path=".env", content="HARNESS_MODEL=x").startswith("wrote")
+
+
+def test_reading_a_credentials_file_asks(box, workspace, deny):
+    (workspace / ".env").write_text("HARNESS_API_KEY=sk-live")
+    assert "credentials file" in run(box, "read_file", path=".env")
+    assert deny.asked == [f"read a credentials file: {workspace / '.env'}"]
+    (workspace / ".env.example").write_text("HARNESS_API_KEY=")
+    assert run(box, "read_file", path=".env.example") == "HARNESS_API_KEY="
+
+
+# ---- read-only toolbox (the subagent's) ---------------------------------------
+
+def test_read_only_copy_refuses_writes_and_never_asks(box, workspace, deny):
+    ro = box.read_only_copy()
+    (workspace / "a.txt").write_text("x")
+    assert run(ro, "read_file", path="a.txt") == "x"
+    assert run(ro, "write_file", path="b.txt", content="y") == "error: this agent can only read"
+    assert run(ro, "str_replace", path="a.txt", old_string="x", new_string="z") == "error: this agent can only read"
+    assert ro.seen and not box.seen  # its reads do not count as the main agent's reads
+    assert deny.asked == []
+
+
+@needs_posix_shell
+def test_read_only_copy_refuses_commands_that_would_ask(box, workspace, deny):
+    ro = box.read_only_copy()
+    (workspace / "keep.txt").write_text("x")
+    assert run(ro, "bash", command="rm keep.txt") == \
+        "error: subagents may only run read-only commands inside the workspace"
+    assert (workspace / "keep.txt").exists() and deny.asked == []
+    assert run(ro, "bash", command="ls").endswith("[exit code 0]")
+
+
+def test_spill_files_are_never_tracked_as_seen(cfg, deny, workspace):
+    cfg.output_cap = 50
+    box = Toolbox(cfg, deny, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    (workspace / "long.txt").write_text("L" * 500)
+    run(box, "read_file", path="long.txt")
+    run(box, "read_file", path=".harness/spill/output-1.txt")
+    assert list(box.seen) == [workspace / "long.txt"]
+
+
+# ---- output capture -----------------------------------------------------------
+
+@needs_posix_shell
+def test_endless_output_keeps_only_head_and_tail(cfg, allow, workspace, monkeypatch):
+    monkeypatch.setattr("harness.tools.MAX_CAPTURE_CHARS", 1000)
+    box = Toolbox(cfg, allow, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    out = box.bash("seq 1 100000")  # ~590 KB of output
+    assert out.startswith("1\n2\n3\n")
+    assert "characters of output dropped" in out
+    assert out.rstrip().endswith("100000\n[exit code 0]".rstrip())
+    assert len(out) < 2500
+
+
+def test_capture_keeps_everything_under_the_limit():
+    import io
+    from harness.tools import _Capture
+    cap = _Capture(io.StringIO("abc" * 10), limit=100)
+    cap.thread.join()
+    assert cap.text() == "abc" * 10
+    # One read returns all 4,000 characters: the tail must still be cut to the limit.
+    cap = _Capture(io.StringIO("".join(f"{i:04d}" for i in range(1000))), limit=40)
+    cap.thread.join()
+    text = cap.text()
+    assert text.startswith("0000000100020003") and text.endswith("0999") and "3,920 characters" in text
+    assert len(text) < 140
+
+
 # ---- skills, todos, task ---------------------------------------------------
+
+def test_skill_folders_are_readable_without_asking(cfg, deny, tmp_path):
+    folder = tmp_path / "skills" / "pdf"
+    (folder / "reference").mkdir(parents=True)
+    (folder / "SKILL.md").write_text("---\nname: pdf\ndescription: d\n---\nSee reference/forms.md")
+    (folder / "reference" / "forms.md").write_text("fill forms like this")
+    box = Toolbox(cfg, deny, skills={"pdf": Skill("pdf", "d", folder / "SKILL.md")}, todos=TodoList(),
+                  sandbox=Sandbox(cfg.workspace, "none"))
+    body = run(box, "read_skill", name="pdf")
+    assert f"[skill folder: {folder.resolve().as_posix()}." in body
+    assert run(box, "read_file", path=str(folder / "reference" / "forms.md")) == "fill forms like this"
+    assert deny.asked == []
+
 
 def test_read_skill(cfg, deny, tmp_path):
     path = tmp_path / "SKILL.md"

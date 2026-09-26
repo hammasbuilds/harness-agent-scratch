@@ -29,24 +29,19 @@ def estimate_tokens(messages: list[dict]) -> int:
 
 
 def choose_cut(messages: list[dict], keep_tokens: int) -> int:
-    """Index of the first message to keep.
+    """Index of the first message to keep; 0 means nothing can go.
 
-    Never cut at a tool message: the assistant message that asked for it would
-    be gone, and APIs reject a tool result with no matching call. Prefer cutting
-    at a user message, where a turn begins.
+    Cuts only at a user message, where a turn begins, so a tool result is never
+    separated from the call that asked for it (APIs reject that). And only
+    finished turns go: the current turn, from the last user message on, is never
+    cut, because it holds the request being worked on. If the current turn alone
+    is too big, the agent shortens its tool outputs instead.
     """
-    def fits(i: int) -> bool:
-        return estimate_tokens(messages[i:]) <= keep_tokens
-
     users = [i for i in range(1, len(messages)) if messages[i]["role"] == "user"]
     for i in users:
-        if fits(i):
+        if estimate_tokens(messages[i:]) <= keep_tokens:
             return i
-    safe = [i for i in range(1, len(messages)) if messages[i]["role"] != "tool"]
-    for i in safe:
-        if fits(i):
-            return i
-    return safe[-1] if safe else 0
+    return users[-1] if users else 0
 
 
 def render_for_summary(messages: list[dict], budget_chars: int) -> str:
@@ -72,13 +67,24 @@ def render_for_summary(messages: list[dict], budget_chars: int) -> str:
 
 
 def compact(messages: list[dict], previous_summary: str, llm: LLM, *, keep_tokens: int,
-            budget_chars: int) -> tuple[str, list[dict]]:
-    """Return (new handoff note, messages to keep)."""
+            budget_chars: int, max_summary_chars: int = 4000) -> tuple[str, list[dict]]:
+    """Return (new handoff note, messages to keep).
+
+    The note is capped: it sits in every later request, and each compaction
+    folds the previous note into the next, so an uncapped note would grow
+    until it alone filled the context.
+    """
     cut = choose_cut(messages, keep_tokens)
     if cut == 0:
         return previous_summary, messages
     body = render_for_summary(messages[:cut], budget_chars)
     if previous_summary:
         body = f"Handoff note from an earlier compaction:\n{previous_summary}\n\nTranscript since then:\n{body}"
-    reply = llm.chat([{"role": "system", "content": COMPACT_SYSTEM}, {"role": "user", "content": body}], None)
-    return reply.content.strip(), messages[cut:]
+    words = max(50, max_summary_chars // 7)
+    system = f"{COMPACT_SYSTEM}\nKeep the note under {words} words."
+    note = llm.chat([{"role": "system", "content": system}, {"role": "user", "content": body}], None).content.strip()
+    if not note:  # an empty summary would silently lose everything that was cut
+        note = previous_summary + ("\n\n" if previous_summary else "") + f"[summary failed; earlier transcript excerpt]\n{body}"
+    if len(note) > max_summary_chars:
+        note = note[:max_summary_chars] + "\n[note cut to fit the context]"
+    return note, messages[cut:]

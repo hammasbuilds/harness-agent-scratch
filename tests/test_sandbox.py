@@ -13,9 +13,12 @@ def test_linux_with_bwrap_confines_writes_and_network(tmp_path):
     ws = str(tmp_path.resolve())
     assert sb.kind == "bwrap"
     assert argv[:5] == ["bwrap", "--ro-bind", "/", "/", "--dev"]
-    assert "--unshare-net" in argv
-    # the workspace bind must come after the /tmp tmpfs, or a workspace under /tmp is hidden
-    assert argv.index("--tmpfs") < argv.index("--bind")
+    for flag in ("--unshare-net", "--unshare-pid", "--unshare-ipc", "--new-session", "--die-with-parent"):
+        assert flag in argv
+    # /run holds the D-Bus and docker sockets, both ways out of a read-only bind
+    assert argv[argv.index("/run") - 1] == "--tmpfs"
+    # the workspace bind must come after both tmpfs mounts, or a workspace under /tmp is hidden
+    assert max(i for i, a in enumerate(argv) if a == "--tmpfs") < argv.index("--bind")
     assert argv[argv.index("--bind") + 1:argv.index("--bind") + 3] == [ws, ws]
     assert argv[-3:] == ["bash", "-c", "ls"]
 
@@ -59,6 +62,20 @@ def test_windows_prefers_git_bash_over_wsl_bash():
 def test_windows_never_picks_wsl_bash_and_falls_back_to_cmd():
     argv, desc = find_shell(system="Windows", which=lambda n: r"C:\Windows\System32\bash.exe",
                             exists=lambda p: False)
+    assert argv == ["cmd.exe", "/d", "/c"]
+
+
+def test_windows_finds_portable_git_next_to_git_exe():
+    git = r"C:\Users\me\tools\PortableGit\cmd\git.exe"
+    bash = r"C:\Users\me\tools\PortableGit\bin\bash.exe"
+    argv, desc = find_shell(system="Windows", which=lambda n: git if n == "git" else None,
+                            exists=lambda p: p == bash)
+    assert argv == [bash, "-c"] and "Git Bash" in desc
+
+
+def test_windows_never_picks_the_windowsapps_wsl_alias():
+    alias = r"C:\Users\me\AppData\Local\Microsoft\WindowsApps\bash.exe"
+    argv, _ = find_shell(system="Windows", which=lambda n: alias if n == "bash" else None, exists=lambda p: False)
     assert argv == ["cmd.exe", "/d", "/c"]
 
 

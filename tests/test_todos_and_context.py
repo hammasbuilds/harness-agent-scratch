@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from harness.context import build_reminder, git_summary, stale_files
+from harness.context import build_reminder, fingerprint, git_summary, stale_files
 from harness.todos import TodoError, TodoList
 
 
@@ -41,10 +41,20 @@ def test_stale_files_catch_edits_and_deletions(tmp_path):
     a, b, c = (tmp_path / n for n in "abc")
     for p in (a, b, c):
         p.write_text("x")
-    seen = {p: p.stat().st_mtime for p in (a, b, c)}
+    seen = {p: fingerprint(p) for p in (a, b, c)}
     os.utime(b, (time.time() + 5, time.time() + 5))
     c.unlink()
     assert stale_files(seen) == [b, c]
+
+
+def test_same_mtime_but_different_size_is_stale(tmp_path):
+    f = tmp_path / "f"
+    f.write_text("short")
+    before = f.stat()
+    seen = {f: fingerprint(f)}
+    f.write_text("a longer rewrite in the same clock tick")
+    os.utime(f, ns=(before.st_atime_ns, before.st_mtime_ns))  # pin mtime back
+    assert stale_files(seen) == [f]
 
 
 def test_reminder_contents(tmp_path):
@@ -53,7 +63,7 @@ def test_reminder_contents(tmp_path):
     f = tmp_path / "src" / "app.py"
     f.parent.mkdir()
     f.write_text("x")
-    seen = {f: f.stat().st_mtime - 10}
+    seen = {f: (0, 0)}
     text = build_reminder(workspace=tmp_path, todos=todos, seen=seen, today=date(2026, 9, 26), git="branch main")
     assert text.startswith("<system-reminder>") and text.endswith("</system-reminder>")
     assert "Today: 2026-09-26" in text

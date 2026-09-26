@@ -5,7 +5,8 @@ import json
 import pytest
 
 from harness.agent import STRIPPED_KEEP
-from harness.llm import Reply, ScriptedLLM, call
+from harness.compaction import estimate_tokens
+from harness.llm import Reply, ScriptedLLM, ToolCall, call
 from harness.skills import Skill
 
 
@@ -131,8 +132,7 @@ def test_max_steps_stops_a_runaway_loop(cfg, make_agent):
 
 
 def test_compaction_kicks_in_and_moves_history_into_the_system_prompt(cfg, make_agent, workspace):
-    cfg.context_limit = 2000
-    (workspace / "big.txt").write_text("z" * 2500)
+    (workspace / "big.txt").write_text("z" * 300)
     llm = ScriptedLLM([
         Reply("", [call("read_file", path="big.txt")]),
         Reply("first done"),
@@ -141,16 +141,169 @@ def test_compaction_kicks_in_and_moves_history_into_the_system_prompt(cfg, make_
     ])
     events = []
     agent = make_agent(llm, on_event=lambda k, d: events.append(k))
+    # Room for about 400 tokens of transcript on top of the fixed overhead.
+    cfg.context_limit = int((agent.overhead_tokens() + 400) / cfg.compact_at)
     agent.send("read big.txt")
-    # Trimming at the start of the next turn is not enough here: the new question
-    # alone is large, so compaction has to run.
-    agent.send("now summarise " + "q" * 5000)
+    assert "compacted" not in events
+    # The new question alone overflows, so the first turn has to go.
+    agent.send("now summarise " + "q" * 3000)
     assert "compacted" in events
     assert agent.summary == "HANDOFF: read big.txt, it is all z"
     assert "HANDOFF" in agent.system_message()["content"]
     assert agent.messages[0]["role"] == "user" and agent.messages[0]["content"].startswith("now summarise")
     compaction_request = llm.requests[2]
     assert compaction_request[1] is None  # no tools offered to the summariser
+
+
+def test_the_budget_counts_everything_that_is_sent(make_agent):
+    counted = {}
+
+    def reply(messages):
+        counted["harness"] = agent.context_tokens()  # what the harness believes it is sending
+        return Reply("ok")
+
+    llm = ScriptedLLM([reply])
+    agent = make_agent(llm)
+    agent.send("hi")
+    request, tools = llm.requests[0]
+    sent = estimate_tokens(request) + estimate_tokens(tools)
+    # The tool schemas alone outweigh a short transcript; leaving them out once
+    # let the real prompt pass num_ctx before compaction triggered.
+    assert estimate_tokens(tools) > estimate_tokens(request[1:-1])
+    assert abs(counted["harness"] - sent) <= 2
+
+
+def test_ctrl_c_mid_tool_leaves_a_valid_transcript(make_agent):
+    llm = ScriptedLLM([Reply("", [call("bash", command="pwd"), call("bash", command="ls")]), Reply("resumed")])
+    agent = make_agent(llm)
+    real = agent.toolbox.call
+    state = {"n": 0}
+
+    def interrupt_second(name, arguments):
+        state["n"] += 1
+        if state["n"] == 2:
+            raise KeyboardInterrupt
+        return real(name, arguments)
+
+    agent.toolbox.call = interrupt_second
+    with pytest.raises(KeyboardInterrupt):
+        agent.send("go")
+    calls = [tc["id"] for tc in agent.messages[1]["tool_calls"]]
+    results = [m["tool_call_id"] for m in agent.messages if m["role"] == "tool"]
+    assert results == calls  # every call has a result, so the next request is valid
+    assert agent.messages[-1]["content"].startswith("error: interrupted")
+    agent.toolbox.call = real
+    assert agent.send("carry on") == "resumed"
+
+
+def test_empty_and_cut_off_replies_are_not_silent(make_agent):
+    agent = make_agent(ScriptedLLM([Reply("   "), Reply("half an ans", truncated=True)]))
+    assert agent.send("a") == "[the model returned an empty reply]"
+    assert agent.send("b") == "half an ans\n[reply cut off: the model reached its output limit]"
+
+
+def test_a_model_stuck_repeating_one_call_is_told(make_agent):
+    same = lambda: Reply("", [call("bash", command="pwd")])
+    llm = ScriptedLLM([same(), same(), same(), Reply("", [call("bash", command="ls")]), Reply("ok")])
+    agent = make_agent(llm)
+    agent.send("go")
+    results = [m["content"] for m in agent.messages if m["role"] == "tool"]
+    assert "[harness:" not in results[0] + results[1]
+    assert "returned this exact result 3 times in a row" in results[2]
+    assert "[harness:" not in results[3]  # a different call resets the count
+
+
+def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_agent, workspace):
+    """The reviewer's case: 8 reads of ~2,400 characters in one reply. There is
+    no older turn to compact, so the current turn's outputs must shrink."""
+    for i in range(8):
+        (workspace / f"f{i}.txt").write_text(f"{i}" * 2400)
+    llm = ScriptedLLM([Reply("", [call("read_file", path=f"f{i}.txt") for i in range(8)]), Reply("done")])
+    events = []
+    agent = make_agent(llm, on_event=lambda k, d: events.append(k))
+    cfg.context_limit = agent.overhead_tokens() + 3000
+    cfg.output_cap = 3000
+    agent.send("read them all")
+    second_request, tools = llm.requests[1]
+    assert estimate_tokens(second_request) + estimate_tokens(tools) <= cfg.compact_at * cfg.context_limit
+    assert "squeezed" in events and "overflow" not in events
+    outputs = [m["content"] for m in agent.messages if m["role"] == "tool"]
+    assert outputs[0].endswith("removed to fit the context]")  # oldest cut first
+    assert outputs[-1] == "7" * 2400  # the latest kept whole while it fits
+
+
+def test_a_deleted_file_is_reported_once(make_agent, workspace):
+    f = workspace / "tmp.txt"
+    f.write_text("x")
+
+    def delete_it(messages):
+        f.unlink()
+        return Reply("", [call("bash", command="pwd")])
+
+    llm = ScriptedLLM([Reply("", [call("read_file", path="tmp.txt")]), delete_it,
+                       Reply("", [call("bash", command="ls")]), Reply("done")])
+    make_agent(llm).send("go")
+    reminders = [r[-1]["content"] for r, _ in llm.requests]
+    assert "- tmp.txt" in reminders[2]
+    assert "- tmp.txt" not in reminders[3]
+
+
+def test_subagent_cannot_run_commands_that_would_ask(make_agent, workspace, allow):
+    (workspace / "keep.txt").write_text("x")
+    llm = ScriptedLLM([
+        Reply("", [call("task", prompt="clean up")]),
+        Reply("", [call("bash", command="rm keep.txt")]),  # the subagent
+        Reply("could not delete"),
+        Reply("ok"),
+    ])
+    make_agent(llm, approve=allow).send("go")
+    assert (workspace / "keep.txt").exists()
+    assert allow.asked == []  # the user was never asked on the subagent's behalf
+    assert "read-only commands" in llm.requests[2][0][-1]["content"]
+
+
+class GreedySubagentModel:
+    """Main agent: delegate once, then finish. Subagent: read file after file
+    until the harness tells it the context is full."""
+
+    def __init__(self):
+        self.sub_requests: list[tuple[list[dict], list | None]] = []
+        self.n = 0
+
+    def chat(self, messages, tools):
+        if messages[0]["content"].startswith("You are an exploration subagent"):
+            self.sub_requests.append((messages, tools))
+            if tools is None:
+                return Reply("partial answer")
+            self.n += 1
+            return Reply("", [ToolCall(f"s{self.n}", "read_file", json.dumps({"path": f"f{self.n % 20}.txt"}))])
+        if any(m["role"] == "tool" for m in messages):
+            return Reply("main done")
+        return Reply("", [ToolCall("m1", "task", json.dumps({"prompt": "read everything"}))])
+
+
+def test_subagent_is_made_to_answer_before_it_overflows(cfg, make_agent, workspace):
+    for i in range(20):
+        (workspace / f"f{i}.txt").write_text(f"{i % 10}" * 2400)
+    cfg.output_cap = 3000
+    cfg.context_limit = 4000
+    llm = GreedySubagentModel()
+    agent = make_agent(llm)
+    assert agent.send("go") == "main done"
+    assert llm.sub_requests[-1][1] is None  # the forced final call offers no tools
+    assert "context is nearly full" in llm.sub_requests[-1][0][-1]["content"]
+    for m, t in llm.sub_requests:
+        assert estimate_tokens(m) + estimate_tokens(t or []) <= cfg.context_limit
+    task_result = next(m for m in agent.messages if m["role"] == "tool")
+    assert task_result["content"] == "partial answer"
+
+
+def test_git_is_asked_once_per_step(make_agent, monkeypatch):
+    calls = []
+    monkeypatch.setattr("harness.agent.git_summary", lambda ws: calls.append(ws) or "branch main")
+    llm = ScriptedLLM([Reply("", [call("bash", command="pwd")]), Reply("", [call("bash", command="ls")]), Reply("ok")])
+    make_agent(llm).send("go")
+    assert len(calls) == 3  # one per model call, however many token estimates each step makes
 
 
 def test_spill_files_are_removed_when_the_turn_ends(cfg, make_agent, workspace):
