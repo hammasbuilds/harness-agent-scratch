@@ -14,6 +14,7 @@ still cannot write outside the workspace or reach the network.
 
 from __future__ import annotations
 
+import ntpath
 import os
 import platform
 import shutil
@@ -87,7 +88,7 @@ def find_shell(configured: str | None = None, system: str | None = None,
         program_files = [os.environ.get("ProgramFiles", r"C:\Program Files"),
                          os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")]
         for base in program_files:
-            candidate = os.path.join(base, "Git", "bin", "bash.exe")
+            candidate = ntpath.join(base, "Git", "bin", "bash.exe")  # Windows separators on any host
             if exists(candidate):
                 return [candidate, "-c"], "Git Bash (POSIX shell syntax; use forward slashes)"
         found = which("bash")
