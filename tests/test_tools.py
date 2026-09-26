@@ -183,6 +183,26 @@ def test_long_output_is_capped_and_spilled_then_cleaned(cfg, deny, workspace):
     assert not spill.exists()
 
 
+def test_a_file_named_harness_does_not_end_the_session(cfg, deny, workspace):
+    (workspace / ".harness").write_text("a cloned repo shipped this")
+    cfg.output_cap = 200
+    box = Toolbox(cfg, deny, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    (workspace / "big.txt").write_text("x" * 1000)
+    assert "the rest was not kept" in run(box, "read_file", path="big.txt")  # was FileExistsError
+    box.cleanup_spill()
+    assert (workspace / ".harness").read_text() == "a cloned repo shipped this"
+
+
+def test_a_failed_spill_write_falls_back(cfg, deny, workspace, monkeypatch):
+    cfg.output_cap = 200
+    box = Toolbox(cfg, deny, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+
+    def full_disk(*a, **k):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(Path, "write_text", full_disk)
+    assert "the rest was not kept" in box.cap("y" * 1000)
+
+
 def test_short_output_is_untouched(box):
     assert box.cap("short") == "short"
 

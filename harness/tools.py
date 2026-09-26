@@ -409,13 +409,16 @@ class Toolbox:
         limit = self.cfg.output_cap
         if len(text) <= limit:
             return text
+        not_kept = (f"{text[:limit]}\n\n[truncated: showing {limit} of {len(text)} characters; the rest was not "
+                    "kept. Narrow the command, or read the file in parts with offset and limit.]")
         if self.read_only or not self._spill_dir_is_safe():
-            # A read-only toolbox (the subagent's) writes nothing, spill files included.
-            return (f"{text[:limit]}\n\n[truncated: showing {limit} of {len(text)} characters; the rest was not kept. "
-                    "Narrow the command, or read the file in parts with offset and limit.]")
-        self.spill_dir.mkdir(parents=True, exist_ok=True)
+            return not_kept  # a read-only toolbox (the subagent's) writes nothing, spill files included
         path = self.spill_dir / f"{self.spill_prefix}-{next(self._spill_ids)}.txt"
-        path.write_text(text, encoding="utf-8", newline="")
+        try:
+            self.spill_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8", newline="")
+        except OSError:
+            return not_kept  # a full disk or a file named .harness must not end the session
         rel = path.relative_to(self.workspace).as_posix()
         return (f"{text[:limit]}\n\n[truncated: showing {limit} of {len(text)} characters. "
                 f"Full output: {rel}. Page it with head, tail, sed -n or grep. Deleted when this turn ends.]")
@@ -424,7 +427,10 @@ class Toolbox:
         """.harness could be a symlink or junction pointing elsewhere; then the
         spill would be written, and later deleted, outside the workspace."""
         try:
-            return self.spill_dir.resolve() == self.spill_dir and self.spill_dir.parent.resolve() == self.spill_dir.parent
+            parent = self.spill_dir.parent
+            if parent.exists() and not parent.is_dir():
+                return False  # a file called .harness
+            return self.spill_dir.resolve() == self.spill_dir and parent.resolve() == parent
         except OSError:
             return False
 

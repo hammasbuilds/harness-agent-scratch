@@ -299,6 +299,35 @@ def test_a_nested_repository_makes_git_ask(tmp_path, nested):
     assert classify("git status", ws) == ASK
 
 
+@pytest.mark.parametrize("command", [
+    "git log --{output,output}=pwned.txt",  # expands to --output=pwned.txt after the flag check
+    "grep --{recursive,recursive} KEY .",
+    "ls {a,b}",
+])
+def test_braces_anywhere_ask(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+@pytest.mark.parametrize("command", [
+    "git show HEAD~1", "git show", "git log -p", "git log --patch -3", "git log -1p", "git log -u",
+    "git log --word-diff", "git log -L 1,5:a.txt", "git diff HEAD~1", "git diff main", "git diff HEAD -- a.txt",
+])
+def test_git_asks_before_printing_file_contents_from_history(box_ws, command):
+    # A committed and later deleted .env stays in history, beyond any workspace scan.
+    assert classify(command, box_ws) == ASK
+
+
+@pytest.mark.parametrize("command", ["git log --oneline -5", "git log --stat", "git status", "git diff",
+                                     "git diff a.txt", "git diff --stat"])
+def test_git_without_history_contents_still_runs(box_ws, command):
+    assert classify(command, box_ws) == ALLOW
+
+
+def test_git_diff_of_the_working_tree_asks_when_it_holds_credentials(box_ws):
+    (box_ws / "src" / ".env").write_text("HARNESS_API_KEY=sk")
+    assert classify("git diff", box_ws) == ASK
+
+
 def test_find_reading_start_points_from_a_file_asks(box_ws):
     assert classify("find -files0-from list.txt -name x", box_ws) == ASK
 

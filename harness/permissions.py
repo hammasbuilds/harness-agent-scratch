@@ -326,19 +326,57 @@ def _git_ok(args: list[str], workspace: Path | None) -> bool:
         i += 1
     if i >= len(args) or args[i] not in GIT_READ_ONLY:
         return False  # also rejects every global option: -C, -c, --namespace, --work-tree, ...
-    rest = args[i + 1:]
+    sub, rest = args[i], args[i + 1:]
     if any(":" in a for a in rest):
         return False  # pathspec magic (:/) and object paths (HEAD:../x) reach past the workspace
     if any(_flag_matches(a, UNSAFE_FLAGS["git"]) for a in rest):
         return False
+    if _shows_history(sub, rest, workspace):
+        return False
     return workspace is None or (_repo_is_workspace(workspace) and repo_is_inert(workspace))
+
+
+# git log options that print file contents from history rather than just commits.
+_PATCH_LONG = ("--patch", "--word-diff", "--color-words", "--full-diff", "--cc", "--diff-merges", "--remerge-diff")
+
+
+def _shows_history(sub: str, rest: list[str], workspace: Path | None) -> bool:
+    """Would this print the contents of old versions of files?
+
+    History can hold a credentials file that was committed and later deleted,
+    which no scan of the workspace can see: `git show HEAD~1` printed an old
+    .env. So `show` always asks, `log` asks when it prints patches, and `diff`
+    asks when it compares anything but the working tree and index.
+    """
+    if sub == "show":
+        return True
+    if sub == "log":
+        for a in rest:
+            if a.startswith("--"):
+                if a.split("=", 1)[0].startswith(_PATCH_LONG):
+                    return True
+            elif a.startswith("-") and not a[1:].isdigit() and any(c in a[1:] for c in "puLcm"):
+                return True  # -p, -u, -L, -c, -m, also inside a bundle
+    if sub == "diff":
+        operands = [a for a in rest if not a.startswith("-")]
+        if "--" in rest:
+            operands = [a for a in rest[:rest.index("--")] if not a.startswith("-")]
+        # A bare word that is not an existing path is a revision (HEAD~1, a branch).
+        if any(workspace is None or not os.path.lexists(workspace / a) for a in operands):
+            return True
+        # Even the working tree: it prints tracked files' contents, like grep -r.
+        if workspace is None or workspace_exposure(workspace)[0]:
+            return True
+    return False
 
 
 def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = False) -> str:
     """Return ALLOW, ASK or DENY for one shell command line."""
     if any(p.search(command) for p in NEVER_RAW):
         return DENY
-    if any(s in command for s in ("$", "`", "<(", ">(")):
+    # Braces too, anywhere: `--{output,output}=x` expands to `--output=x` after
+    # every flag check here has compared the literal text and found no match.
+    if any(s in command for s in ("$", "`", "<(", ">(", "{", "}")):
         return ASK
     if cmd_shell and (not _CMD_PLAIN.fullmatch(command.strip()) or ".." in command):
         return ASK

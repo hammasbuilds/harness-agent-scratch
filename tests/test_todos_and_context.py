@@ -33,6 +33,23 @@ def test_todo_validation(raw, message):
     assert todos.render() == "[ ] keep me"  # a rejected update leaves the list alone
 
 
+def test_todo_list_size_is_bounded():
+    # It rides in every request's reminder, which cannot be trimmed: 80 items of
+    # 400 characters once made every later request overflow.
+    todos = TodoList()
+    with pytest.raises(TodoError, match="at most 30"):
+        todos.replace([{"content": f"step {i}", "status": "pending"} for i in range(31)])
+    with pytest.raises(TodoError, match="keep each under 200"):
+        todos.replace([{"content": "x" * 201, "status": "pending"}])
+
+
+def test_reminder_parts_are_bounded(tmp_path):
+    seen = {tmp_path / f"gone{i}.txt": (0, 0) for i in range(50)}
+    text = build_reminder(workspace=tmp_path, todos=TodoList(), seen=seen, today=date(2026, 1, 1),
+                          git="branch main, last commit abc " + "s" * 5000)
+    assert "... and 30 more" in text and len(text) < 7000
+
+
 def test_empty_todo_list():
     assert TodoList().render() == "(no todos)"
 

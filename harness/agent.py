@@ -21,7 +21,7 @@ import platform
 from datetime import date
 from typing import Callable
 
-from .compaction import compact, estimate_tokens
+from .compaction import compact, estimate_tokens, text_tokens
 from .config import Config
 from .context import build_reminder, git_summary
 from .llm import LLM, ContextOverflow
@@ -49,6 +49,7 @@ STRIPPED_KEEP = 200
 REPEAT_WARNING = 3  # identical call + identical result this many times in a row
 MIN_KEEP_TOKENS = 256
 SUMMARY_SHARE = 0.15  # the handoff note may use at most this share of the context
+COMPACT_OVERHEAD = 400  # tokens for the summariser's instructions and the message framing
 
 
 class Agent:
@@ -179,7 +180,7 @@ class Agent:
 
     def _subagent(self, prompt: str) -> str:
         return run_subagent(prompt, llm=self.llm, toolbox=self.toolbox, max_steps=self.cfg.subagent_max_steps,
-                            context_limit=self.cfg.context_limit, on_event=self.on_event)
+                            context_limit=self.prompt_room(), on_event=self.on_event)
 
     def _trim_old_tool_outputs(self) -> None:
         """A finished turn's tool outputs are rarely needed again and are the
@@ -253,7 +254,9 @@ class Agent:
             # compact_to is a share of the whole prompt, so the fixed overhead
             # comes out of it before deciding how much transcript to keep.
             keep_tokens=max(MIN_KEEP_TOKENS, int(self.cfg.compact_to * limit) - self.overhead_tokens()),
-            budget_tokens=int(limit * 0.6),
+            # The summarising request must fit beside its reply too: what is left
+            # after the previous note and the instructions goes to the transcript.
+            budget_tokens=max(MIN_KEEP_TOKENS, self.prompt_room() - text_tokens(self.summary) - COMPACT_OVERHEAD),
             max_summary_tokens=int(limit * SUMMARY_SHARE),
         )
         # Nothing droppable (one oversized message) leaves the transcript as it was.

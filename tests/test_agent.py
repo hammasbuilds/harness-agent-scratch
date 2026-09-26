@@ -339,6 +339,38 @@ def test_the_prompt_leaves_room_for_the_reply(cfg, make_agent):
         agent.send("word " * 800)  # fits the context, not the context minus the reply
 
 
+def test_subagent_requests_leave_room_for_the_reply_at_default_settings(cfg, make_agent, workspace):
+    # With the real defaults (8k context, 2k reply) the subagent once sent 6,549
+    # tokens into 6,144 of room, the context-shift failure the main loop prevents.
+    for i in range(20):
+        (workspace / f"f{i}.txt").write_text(chr(97 + i % 26) * 2400)
+    cfg.max_output_tokens, cfg.context_limit, cfg.output_cap = 2048, 8192, 3000
+    llm = GreedySubagentModel()
+    agent = make_agent(llm)
+    agent.send("go")
+    room = agent.prompt_room()
+    assert max(estimate_tokens(m) + estimate_tokens(t or []) for m, t in llm.sub_requests) <= room
+
+
+def test_the_compaction_request_fits_beside_its_reply(cfg, make_agent, workspace):
+    cfg.max_output_tokens, cfg.context_limit = 2048, 8192
+    agent = make_agent(ScriptedLLM([]))
+    agent.summary = "earlier: " + "note " * 1500  # a previous handoff note near its cap
+    agent.messages = [m for n in range(12) for m in [
+        {"role": "user", "content": f"task {n} " + "q" * 3000},
+        {"role": "assistant", "content": f"done {n} " + "a" * 3000}]]
+    agent.messages.append({"role": "user", "content": "latest"})
+    seen = []
+
+    def summarise(messages):
+        seen.append(estimate_tokens(messages))
+        return Reply("short note")
+
+    agent.llm = ScriptedLLM([summarise])
+    agent._compact_old_turns()
+    assert seen and seen[0] <= agent.prompt_room()  # was ~6,389 against 6,144
+
+
 def test_a_cut_off_subagent_answer_says_so():
     from harness.subagent import _finish
     assert _finish("half an ans", lambda k, d: None, truncated=True).endswith("cut off at the model's output limit]")

@@ -10,6 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 STATUSES = ("pending", "in_progress", "completed")
+# The list rides in every request's reminder, which cannot be trimmed; an
+# unbounded one (80 items of 400 characters) made every later request overflow.
+MAX_ITEMS = 30
+MAX_ITEM_CHARS = 200
 MARKS = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
 
 
@@ -30,6 +34,8 @@ class TodoList:
     def replace(self, raw: list) -> str:
         if not isinstance(raw, list):
             raise TodoError("todos must be a list of {content, status} objects")
+        if len(raw) > MAX_ITEMS:
+            raise TodoError(f"at most {MAX_ITEMS} todos; group smaller steps together")
         items = []
         for n, entry in enumerate(raw, 1):
             if not isinstance(entry, dict):
@@ -38,6 +44,8 @@ class TodoList:
             status = entry.get("status", "pending")
             if not content:
                 raise TodoError(f"item {n} has no content")
+            if len(content) > MAX_ITEM_CHARS:
+                raise TodoError(f"item {n} is {len(content)} characters; keep each under {MAX_ITEM_CHARS}")
             if status not in STATUSES:
                 raise TodoError(f"item {n} has status {status!r}; use one of {', '.join(STATUSES)}")
             items.append(Todo(content, status))

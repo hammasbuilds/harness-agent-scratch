@@ -16,6 +16,11 @@ from pathlib import Path
 from .permissions import repo_config_is_plain
 from .todos import TodoList
 
+# The reminder rides in every request and cannot be trimmed, so every part of
+# it is bounded.
+GIT_SUMMARY_CHARS = 200
+MAX_STALE_SHOWN = 20
+
 
 def _git_dir(workspace: Path) -> Path | None:
     """The repository the workspace belongs to, found without git's own search.
@@ -57,7 +62,8 @@ def git_summary(workspace: Path) -> str | None:
             return None  # not a git repository
         branch = f"(detached at {detached})"
     head = git("log", "-1", "--format=%h %s")
-    return f"branch {branch}" + (f", last commit {head}" if head else ", no commits yet")
+    summary = f"branch {branch}" + (f", last commit {head}" if head else ", no commits yet")
+    return summary[:GIT_SUMMARY_CHARS]  # it rides in every request; a huge commit subject must not
 
 
 def fingerprint(path: Path) -> tuple[int, int]:
@@ -91,11 +97,13 @@ def build_reminder(*, workspace: Path, todos: TodoList, seen: dict[Path, tuple[i
     stale = stale_files(seen)
     if stale:
         lines.append("These files changed on disk since you last read them; read them again before editing:")
-        for p in stale:
+        for p in stale[:MAX_STALE_SHOWN]:
             try:
                 shown = p.relative_to(workspace)
             except ValueError:
                 shown = p
             lines.append(f"- {shown.as_posix()}")
+        if len(stale) > MAX_STALE_SHOWN:
+            lines.append(f"- ... and {len(stale) - MAX_STALE_SHOWN} more")
     lines.append("</system-reminder>")
     return "\n".join(lines)

@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/models-local%20via%20ollama%20(CPU)-success" alt="models">
   <img src="https://img.shields.io/badge/API%20keys-none%20required-success" alt="api keys">
   <img src="https://img.shields.io/badge/dependencies-0-success" alt="dependencies">
-  <img src="https://img.shields.io/badge/tests-498-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-525-brightgreen" alt="tests">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license"></a>
 </p>
 
@@ -61,15 +61,15 @@ asserts that each request starts with the previous one.
 | | Step | Tests | What it does |
 |---|---|---|---|
 | 01 | [Model call](harness/llm.py) | 71 | One POST per call with `http.client`; redirects are refused, since following one would carry the API key to another address. Two backends, one `Reply`: Ollama's native `/api/chat` (the only Ollama endpoint that takes `num_gpu`/`num_ctx` per request) and any OpenAI-compatible `/chat/completions` (OpenRouter, DeepSeek, …). Retries rate limits, 5xx and dropped connections, honouring `Retry-After` up to a minute (not timeouts: on a CPU a timeout already cost minutes). The timeout is a timer that closes the socket, so it covers the status line, headers and body, not each read. Flags replies cut off at the output limit; a reply in the wrong JSON shape or with wrong-typed fields is an error, not a crash. Recovers tool calls a model wrote as text, but only when the reply is nothing else: a `<tool_call>` quoted in prose is not run. |
-| 02 | [Tools](harness/tools.py) | 93 | `bash`, `read_file`, `write_file`, `str_replace`, `read_skill`, `write_todos`, `task`. Arguments checked against the schema, types included; every failure goes back to the model as text instead of ending the loop. Edits keep a file's encoding (UTF-8, UTF-16 LE/BE, Latin-1) and line endings (LF, CRLF or mixed) byte for byte outside the edited text. `.git` is blocked at any depth; `.env`, `.agents/`, `.harness/` and credentials files need a yes; on Windows, names that alias another name are refused: a trailing dot or space (which Windows strips) and `name:stream` (`.env::$DATA` is `.env`). |
-| 03 | [Agent loop](harness/agent.py) | 31 | `while` the model asks for tools: run them, append the results as `role: tool`, call again. Ctrl-C mid-tool still leaves every call with a result; a model repeating one call is told so. |
+| 02 | [Tools](harness/tools.py) | 95 | `bash`, `read_file`, `write_file`, `str_replace`, `read_skill`, `write_todos`, `task`. Arguments checked against the schema, types included; every failure goes back to the model as text instead of ending the loop. Edits keep a file's encoding (UTF-8, UTF-16 LE/BE, Latin-1) and line endings (LF, CRLF or mixed) byte for byte outside the edited text. `.git` is blocked at any depth; `.env`, `.agents/`, `.harness/` and credentials files need a yes; on Windows, names that alias another name are refused: a trailing dot or space (which Windows strips) and `name:stream` (`.env::$DATA` is `.env`). |
+| 03 | [Agent loop](harness/agent.py) | 33 | `while` the model asks for tools: run them, append the results as `role: tool`, call again. Ctrl-C mid-tool still leaves every call with a result; a model repeating one call is told so. |
 | 04 | [Skills](harness/skills.py) | 9 | Finds `SKILL.md` under `~/.agents/skills` and `<workspace>/.agents/skills`; only name + description enter the system prompt, the body loads on demand, and files in a skill's folder are readable without a prompt. |
-| 05 | [Late injection](harness/context.py) | 16 | Date, git branch/commit, todo list and stale-file warnings, added after the transcript in a `<system-reminder>`. |
-| 06 | [Todos](harness/todos.py) | ↑ | The model rewrites the whole list each time; one item `in_progress` at a time. |
-| 07 | [Permissions](harness/permissions.py) | 206 | An allowlist, not a list of dangers. Runs without asking only: bare names of programs that have no writing or executing option at all (`sort`, `file`, `tree`, `date`, `rg` are left out; `./ls` asks); `git` only as `git <read-only subcommand>` with no global options or `:` pathspecs, only with a real `.git` folder in the workspace whose config holds only the keys a plain clone writes, with no active hooks, submodules or nested repositories; no `$`, braces or unknown operators; every path-like argument (glued to a flag, after a `:`, through globs and symlinks) inside the workspace and not a credentials file; recursive readers (every grep spelling: `-r`, `-d recurse`, `--rec`, …) only when the workspace holds no credentials, and link-following walkers (`find -L`, `ls -L`, `du -L`) only when no symlink or junction leads out of it. |
+| 05 | [Late injection](harness/context.py) | 18 | Date, git branch/commit, todo list and stale-file warnings, added after the transcript in a `<system-reminder>`. |
+| 06 | [Todos](harness/todos.py) | ↑ | The model rewrites the whole list each time; one item `in_progress` at a time; at most 30 items of 200 characters, since the list rides in every request. |
+| 07 | [Permissions](harness/permissions.py) | 227 | An allowlist, not a list of dangers. Runs without asking only: bare names of programs that have no writing or executing option at all (`sort`, `file`, `tree`, `date`, `rg` are left out; `./ls` asks); `git` only as `git <read-only subcommand>` with no global options or `:` pathspecs, only with a real `.git` folder in the workspace whose config holds only the keys a plain clone writes, with no active hooks, submodules or nested repositories, and never printing file contents from history (`show`, `log -p`, `diff <rev>`); no `$` or braces anywhere (not even inside an option name) and no unknown operators; every path-like argument (glued to a flag, after a `:`, through globs and symlinks) inside the workspace and not a credentials file; recursive readers (every grep spelling: `-r`, `-d recurse`, `--rec`, …) only when the workspace holds no credentials, and link-following walkers (`find -L`, `ls -L`, `du -L`) only when no symlink or junction leads out of it. |
 | 08 | [Sandbox](harness/sandbox.py) | 12 | Linux: bubblewrap with a read-only root, private `/tmp` and `/run`, no network, own PID namespace. macOS: Seatbelt, writes only in the workspace and system temp folders, no network. Windows: none, and the CLI says so. |
 | 09 | [Output capping](harness/tools.py) | ↑ | Results over 3,000 characters are cut; the full text goes to `.harness/spill/` for `head`/`grep`, and is deleted when the turn ends. A command's output is held to its first and last 1M characters, and nothing it starts outlives it: background processes are stopped (a Job Object on Windows, the process group elsewhere). Commands run without credential variables in their environment, with Python children set to write UTF-8. |
-| 10 | [Compaction](harness/compaction.py) | 20 | Counts everything sent (system prompt, ~900 tokens of tool schemas, reminder, transcript) with an estimator calibrated against the Qwen2.5 tokenizer, and keeps room for the reply (`HARNESS_MAX_OUTPUT_TOKENS`, 2,048). At 85% of the limit, finished turns become a model-written handoff note capped at 15% of the context in tokens (not characters); if the current turn alone is too big, its tool outputs are cut, oldest first. |
+| 10 | [Compaction](harness/compaction.py) | 20 | Counts everything sent (system prompt, ~900 tokens of tool schemas, reminder, transcript) with an estimator calibrated against the Qwen2.5 tokenizer, and keeps room for the reply (`HARNESS_MAX_OUTPUT_TOKENS`, 2,048). At 85% of the limit (or earlier, to leave room for the reply), finished turns become a model-written handoff note capped at 15% of the context in tokens (not characters); if the current turn alone is too big, its tool outputs are cut, oldest first. |
 | 11 | [Subagents](harness/subagent.py) | ↑ | `task` starts a fresh context with its own read-only toolbox: commands that would need a yes are refused, never asked. Its budget forces an answer before it overflows, and a request that cannot fit even then is not sent. Only its final answer returns. One level deep. |
 | 12 | [CLI](harness/cli.py) + [config](harness/config.py) | 40 | `harness` REPL or `harness -p "task"`. Settings from flags, the environment, `~/.config/harness/.env`, then the project's `.env`, which may set only temperature and compaction thresholds. Approval prompts, tool output and model text show control characters as escapes, so nothing printed can rewrite the screen. |
 
@@ -184,7 +184,7 @@ harness/
   config.py       HARNESS_* settings and .env
   cli.py          terminal front end
 demo.py           one task in a throwaway folder (--scripted for no model)
-tests/            498 tests; scripted model, real tools
+tests/            525 tests; scripted model, real tools
 ```
 
 ## Requirements
@@ -202,7 +202,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-498 tests, one to two minutes on a laptop CPU (it varies with load; one test, following a symlink, is skipped on Windows accounts that cannot create symlinks; junctions, which need no rights, are tested instead). No network, no model, no GPU: a `ScriptedLLM` replays pre-written
+525 tests, one to two minutes on a laptop CPU (it varies with load; one test, following a symlink, is skipped on Windows accounts that cannot create symlinks; junctions, which need no rights, are tested instead). No network, no model, no GPU: a `ScriptedLLM` replays pre-written
 replies while the tools really run: files are written, `bash` really executes, subagents really run
 their own loop. HTTP handling is tested against a local `http.server` stub. The suite was also run
 in a fresh virtualenv holding only pytest, with `HOME` pointed at an empty folder, so it does not
@@ -232,8 +232,9 @@ depend on this machine's skills, Ollama models or environment.
 
 ## Problems hit while building this
 
-After the first build, eight independent reviewers in turn attacked the code, each without seeing
-the others' reports. They scored the successive versions 64, 64, 67, 72, 81, 83, 78 and 80 out of 100 (the last
+After the first build, nine independent reviewers in turn attacked the code, each without seeing
+the others' reports. They scored the successive versions 64, 64, 67, 72, 81, 83, 78, 80 and 84 out of
+100 (the last
 without a security score: two of the four were stopped part-way through probing the permission
 checker, and that audit was then done by hand) and proved every
 finding with a probe; each one below was reproduced, fixed and pinned by a test.
@@ -297,6 +298,13 @@ finding with a probe; each one below was reproduced, fixed and pinned by a test.
   pre-tokenisation (words, single digits, punctuation, random-looking runs) and was checked against
   the real tokenizer on 23 kinds of text. It also reserves room for the reply, which shares
   Ollama's `num_ctx` with the prompt.
+- **The ninth reviewer put braces inside an option name.** `git log --{output,output}=pwned.txt`
+  wrote a file and `grep --{recursive,recursive} KEY .` read `.env`, both unasked: every flag check
+  compared the literal text, and bash expanded it afterwards. Any brace now asks, like `$`. It also
+  read a deleted `.env` through `git show HEAD~1`; history-printing git commands ask now.
+- **One oversized todo list wedged the session for good**: it rides in the reminder, which is never
+  trimmed, so every later request overflowed. The list, the git summary and the stale-file list in
+  the reminder are all bounded now.
 - **The token budget ignored ~900 tokens of tool schemas.** With an 8,192-token Ollama context,
   compaction would have triggered only after the real prompt had overflowed, and Ollama drops the
   start of an overlong prompt (the system prompt) without an error.
