@@ -65,6 +65,12 @@ def test_read_with_offset_and_limit(box, workspace):
     assert run(box, "read_file", path="f.txt", offset=3, limit=2) == "line 3\nline 4\n[lines 3-4 of 10]"
 
 
+def test_offset_past_the_end_is_an_error(box, workspace):
+    (workspace / "six.txt").write_text("1\n2\n3\n4\n5\n6")
+    assert run(box, "read_file", path="six.txt", offset=100) == "error: offset 100 is past the end of six.txt (6 lines)"
+    assert run(box, "read_file", path="six.txt", offset=6) == "6\n[lines 6-6 of 6]"
+
+
 def test_read_missing_file(box):
     assert run(box, "read_file", path="nope.txt") == "error: nope.txt does not exist or is not a file"
 
@@ -437,6 +443,15 @@ def test_reading_a_credentials_file_asks(box, workspace, deny):
 
 
 # ---- read-only toolbox (the subagent's) ---------------------------------------
+
+def test_read_only_copy_writes_no_spill_files(cfg, deny, workspace):
+    cfg.output_cap = 200
+    ro = Toolbox(cfg, deny, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none")).read_only_copy()
+    (workspace / "big.txt").write_text("x" * 1000)
+    out = run(ro, "read_file", path="big.txt")
+    assert "the rest was not kept" in out and "offset and limit" in out
+    assert not (workspace / ".harness").exists()  # "cannot change files" holds exactly
+
 
 def test_read_only_copy_refuses_writes_and_never_asks(box, workspace, deny):
     ro = box.read_only_copy()

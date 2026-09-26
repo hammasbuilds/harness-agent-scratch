@@ -275,6 +275,46 @@ def test_recursive_readers_ask_only_when_the_workspace_holds_secrets(box_ws):
     assert classify("grep -n x a.txt", box_ws) == ALLOW  # not recursive
 
 
+@pytest.mark.parametrize("command", [
+    "grep -d recurse KEY .", "grep --directories recurse KEY .", "grep --dir=recurse KEY .",
+    "grep --recur KEY .", "grep --rec KEY .", "grep --dereference-rec KEY .", "egrep -R KEY .", "fgrep -rl KEY .",
+])
+def test_every_spelling_of_grep_recursion_is_caught(box_ws, command):
+    (box_ws / ".env").write_text("HARNESS_API_KEY=sk")
+    assert classify(command, box_ws) == ASK
+
+
+def _junction_out_of(ws: Path, target: Path) -> None:
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(ws / "linked"))
+    else:
+        (ws / "linked").symlink_to(target, target_is_directory=True)
+
+
+@pytest.mark.parametrize("command", ["ls -L linked", "find -L . -name x", "du -L", "grep -r x .", "rg x",
+                                     "ls -laRL", "du --deref"])
+def test_link_following_walkers_ask_when_a_link_leads_out(box_ws, tmp_path, command):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    try:
+        _junction_out_of(box_ws, outside)
+    except OSError:
+        pytest.skip("cannot create a junction or symlink here")
+    assert classify(command, box_ws) == ASK
+
+
+def test_walkers_that_do_not_follow_links_still_run_beside_one(box_ws, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    try:
+        _junction_out_of(box_ws, outside)
+    except OSError:
+        pytest.skip("cannot create a junction or symlink here")
+    assert classify("ls -la", box_ws) == ALLOW
+    assert classify("find . -name '*.txt'", box_ws) == ALLOW
+
+
 @pytest.mark.parametrize("command", ["echo hi > -", "ls &> -", "echo hi > NUL", "cat a.txt <> b.txt"])
 def test_only_dev_null_is_a_harmless_redirect(box_ws, command):
     assert classify(command, box_ws) == ASK

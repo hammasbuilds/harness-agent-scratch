@@ -227,6 +227,56 @@ def test_the_timeout_covers_the_whole_response_not_each_read():
     assert elapsed < 4  # the full trickle takes ~10 s; each single read is well under the timeout
 
 
+class _SlowErrorHandler(BaseHTTPRequestHandler):
+    """HTTP 500 whose body trickles in: the error path needs the deadline too."""
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        body = b'{"error": "internal failure, please retry later"}'
+        self.send_response(500)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", "7")
+        self.end_headers()
+        for byte in body:
+            try:
+                self.wfile.write(bytes([byte]))
+                self.wfile.flush()
+            except OSError:
+                return
+            time.sleep(0.2)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_a_slow_error_body_is_cut_at_the_deadline():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _SlowErrorHandler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    start = time.monotonic()
+    try:
+        with pytest.raises(LLMError, match="HTTP 500") as err:
+            http_post_json(f"http://127.0.0.1:{server.server_port}/api/chat", {}, {}, 1.0)
+        elapsed = time.monotonic() - start
+    finally:
+        server.shutdown()
+    assert elapsed < 3  # the whole body takes ~10 s
+    assert err.value.retryable and err.value.retry_after == 7.0
+
+
+def test_retry_after_lengthens_the_wait_up_to_a_cap(tmp_path):
+    post = FlakyPost([LLMError("429", retryable=True, retry_after=20), LLMError("429", retryable=True, retry_after=500)],
+                     {"message": {"content": "ok"}})
+    waits = []
+    OllamaBackend(cfg(tmp_path), post, sleep=waits.append).chat(HISTORY, None)
+    assert waits == [20, 60]  # the server's 20 s honoured; 500 s capped at a minute
+
+
+def test_inline_call_with_arguments_as_json_text():
+    calls = extract_inline_tool_calls('{"name": "bash", "arguments": "{\\"command\\": \\"ls\\"}"}', {"bash"})
+    assert [(c.name, json.loads(c.arguments)) for c in calls] == [("bash", {"command": "ls"})]
+
+
 def _closed_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))

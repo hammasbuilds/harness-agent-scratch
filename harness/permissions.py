@@ -78,17 +78,32 @@ def is_secret_file(name: str) -> bool:
     return bool(_SECRET_FILE.match(re.split(r"[\\/]", name)[-1]))
 
 
-def workspace_has_secrets(workspace: Path) -> bool:
-    """True if any credentials file is in the workspace (or the tree is too big to tell)."""
+def workspace_exposure(workspace: Path) -> tuple[bool, bool]:
+    """(holds a credentials file, holds a symlink or junction leading outside).
+
+    A recursive reader would read the first; one that follows links would walk
+    out through the second. A tree too big to scan counts as both.
+    """
+    secrets = outward = False
     seen = 0
     for root, dirs, files in os.walk(workspace):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
         seen += len(files) + len(dirs)
-        if any(is_secret_file(f) for f in files):
-            return True
         if seen > _SCAN_LIMIT:
-            return True
-    return False
+            return True, True
+        secrets = secrets or any(is_secret_file(f) for f in files)
+        for name in dirs + files:
+            p = Path(root) / name
+            if (p.is_symlink() or getattr(os.path, "isjunction", lambda _: False)(p)) and \
+                    _outside_or_secret(str(p), workspace):
+                outward = True
+        if secrets and outward:
+            break
+    return secrets, outward
+
+
+def workspace_has_secrets(workspace: Path) -> bool:
+    return workspace_exposure(workspace)[0]
 
 
 def _outside_or_secret(path: str, workspace: Path) -> bool:
@@ -160,16 +175,46 @@ def _flag_matches(arg: str, flags: set[str]) -> bool:
     return key.startswith("--") and len(key) > 2 and any(f.startswith(key) for f in flags if f.startswith("--"))
 
 
+RECURSIVE_LONG = ("--recursive", "--dereference-recursive", "--directories")
+# Options that make a directory walker follow symlinks out of the tree.
+FOLLOW_LINKS = {"find": {"-L", "-H", "-follow"}, "ls": set("LH"), "dir": set("LH"), "du": set("LHD")}
+
+
 def _recursive(name: str, args: list[str]) -> bool:
+    """Does this command read file contents through a directory tree?
+
+    grep has several spellings: -r, -R, -d recurse, --directories=recurse and
+    any abbreviation getopt accepts (--rec, --dir). `-d` and --directories are
+    treated as recursion whatever their value, which only ever over-asks.
+    """
     if name == "rg":
         return True
     letters = RECURSIVE.get(name)
     if not letters:
         return False
+    if name != "diff":
+        letters += "d"
     for a in args:
-        if a in ("--recursive", "--dereference-recursive") or a.startswith("--directories=r") or a.startswith("--recursive"):
+        key = a.split("=", 1)[0]
+        if key.startswith("--") and len(key) >= 4 and any(opt.startswith(key) for opt in RECURSIVE_LONG):
             return True
         if a.startswith("-") and not a.startswith("--") and any(c in a[1:] for c in letters):
+            return True
+    return False
+
+
+def _follows_links(name: str, args: list[str]) -> bool:
+    flags = FOLLOW_LINKS.get(name)
+    if not flags:
+        return False
+    for a in args:
+        if name == "find":
+            if a in flags:
+                return True
+        elif a.startswith("--"):
+            if len(a) >= 5 and "--dereference".startswith(a.split("=", 1)[0]):
+                return True
+        elif a.startswith("-") and any(c in a[1:] for c in flags):
             return True
     return False
 
@@ -258,8 +303,13 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
         # `uniq IN OUT` overwrites OUT.
         if name == "uniq" and len([a for a in args if not a.startswith("-") or a == "-"]) >= 2:
             return ASK
-        if _recursive(name, args) and (workspace is None or workspace_has_secrets(workspace)):
-            return ASK
+        reads_tree, follows = _recursive(name, args), _follows_links(name, args)
+        if reads_tree or follows:
+            if workspace is None:
+                return ASK
+            secrets, outward = workspace_exposure(workspace)
+            if outward or (reads_tree and secrets):
+                return ASK
         for a in args:
             read_targets += _candidates(a)
 

@@ -11,8 +11,12 @@ from .agent import Agent
 from .config import PROJECT_SETTINGS, Config, load_dotenv, user_config_file
 from .llm import LLMError, make_llm
 from .sandbox import SandboxUnavailable
+from .tools import printable
 
 RESULT_PREVIEW = 400
+def _screen_safe(text: str) -> str:
+    """Escape every control character except newlines and tabs."""
+    return "\n".join("\t".join(printable(cell) for cell in line.split("\t")) for line in text.split("\n"))
 
 
 class Printer:
@@ -24,9 +28,13 @@ class Printer:
         self.c = (lambda code, s: f"\033[{code}m{s}\033[0m") if color else (lambda code, s: s)
 
     def __call__(self, kind: str, data) -> None:
-        c, p = self.c, lambda s: print(s, file=self.out, flush=True)
+        # Model text and file contents may hold escape sequences or \r that would
+        # erase or rewrite lines on screen, hiding what happened before a prompt.
+        # Cleaned before our own colour codes go around it.
+        c = lambda code, s: self.c(code, _screen_safe(s))
+        p = lambda s: print(s, file=self.out, flush=True)
         if kind == "assistant_text":
-            p(data)
+            p(_screen_safe(data))
         elif kind == "tool_call":
             p(c("36", f"> {data.name} {data.arguments}"))
         elif kind == "subagent_tool_call":
@@ -114,9 +122,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.prompt:
         try:
-            print(agent.send(args.prompt))
+            print(_screen_safe(agent.send(args.prompt)))
         except LLMError as e:
-            print(f"error: {e}", file=sys.stderr)
+            print(_screen_safe(f"error: {e}"), file=sys.stderr)
             return 1
         return 0
 
@@ -132,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         if text in ("/exit", "/quit"):
             return 0
         if text == "/todos":
-            print(agent.todos.render())
+            print(_screen_safe(agent.todos.render()))
             continue
         if text == "/tokens":
             print(f"~{agent.context_tokens()} of {cfg.context_limit} tokens in context")
@@ -142,8 +150,8 @@ def main(argv: list[str] | None = None) -> int:
             print("started a fresh conversation")
             continue
         try:
-            print("\n" + agent.send(text))
+            print("\n" + _screen_safe(agent.send(text)))
         except LLMError as e:
-            print(f"error: {e}", file=sys.stderr)
+            print(_screen_safe(f"error: {e}"), file=sys.stderr)
         except KeyboardInterrupt:
             print("\n[interrupted]")

@@ -320,8 +320,10 @@ class Toolbox:
         limit = self.cfg.output_cap
         if len(text) <= limit:
             return text
-        if not self._spill_dir_is_safe():
-            return f"{text[:limit]}\n\n[truncated: showing {limit} of {len(text)} characters; the rest was not kept]"
+        if self.read_only or not self._spill_dir_is_safe():
+            # A read-only toolbox (the subagent's) writes nothing, spill files included.
+            return (f"{text[:limit]}\n\n[truncated: showing {limit} of {len(text)} characters; the rest was not kept. "
+                    "Narrow the command, or read the file in parts with offset and limit.]")
         self.spill_dir.mkdir(parents=True, exist_ok=True)
         path = self.spill_dir / f"{self.spill_prefix}-{next(self._spill_ids)}.txt"
         path.write_text(text, encoding="utf-8", newline="")
@@ -464,6 +466,8 @@ class Toolbox:
             self.seen[p] = fingerprint(p)
         lines = text.split("\n")
         start = max(1, int(offset)) - 1
+        if start >= len(lines) and start > 0:
+            raise ToolError(f"offset {start + 1} is past the end of {self._show(p)} ({len(lines)} lines)")
         chunk = lines[start:start + max(1, int(limit))]
         body = "\n".join(chunk)
         if start > 0 or start + len(chunk) < len(lines):

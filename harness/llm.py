@@ -35,13 +35,16 @@ class LLMError(RuntimeError):
     same request would cost them again.
     """
 
-    def __init__(self, message: str, retryable: bool = False):
+    def __init__(self, message: str, retryable: bool = False, retry_after: float | None = None):
         super().__init__(message)
         self.retryable = retryable
+        self.retry_after = retry_after  # seconds the server asked for, from Retry-After
 
 
 RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504}
 MAX_RESPONSE_BYTES = 20_000_000
+MAX_ERROR_BYTES = 65_536
+MAX_RETRY_WAIT = 60.0
 
 
 class ContextOverflow(LLMError):
@@ -79,6 +82,36 @@ class LLM(Protocol):
 Post = Callable[[str, dict, dict, float], dict]
 
 
+def _read_body(stream, deadline: float, cap: int, url: str, truncate: bool = False) -> bytes:
+    """Read a response within the deadline and size cap.
+
+    read1 returns whatever has arrived; read(n) would block until n bytes or the
+    end, so the deadline would never be checked while a server trickles.
+    """
+    read = getattr(stream, "read1", None) or stream.read
+    chunks, size = [], 0
+    while chunk := read(65536):
+        chunks.append(chunk)
+        size += len(chunk)
+        if size > cap:
+            if truncate:
+                break
+            raise LLMError(f"{url} sent more than {cap:,} bytes; giving up")
+        if time.monotonic() > deadline:
+            if truncate:
+                break
+            raise TimeoutError
+    return b"".join(chunks)[:cap]
+
+
+def _retry_after(headers) -> float | None:
+    """Seconds from a Retry-After header, when it is a number (dates are ignored)."""
+    try:
+        return float(headers.get("Retry-After")) if headers and headers.get("Retry-After") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def http_post_json(url: str, body: dict, headers: dict, timeout: float) -> dict:
     request = urllib.request.Request(
         url,
@@ -87,26 +120,21 @@ def http_post_json(url: str, body: dict, headers: dict, timeout: float) -> dict:
         method="POST",
     )
     # urllib's timeout applies to each socket read, so a server sending one byte
-    # a second never trips it. The deadline covers the whole response.
+    # a second never trips it. The deadline covers the whole response, error
+    # bodies included.
     deadline = time.monotonic() + timeout
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            chunks, size = [], 0
-            # read1: whatever has arrived. read(n) would block until n bytes or the
-            # end, so the deadline would never be checked while a server trickles.
-            while chunk := response.read1(65536):
-                chunks.append(chunk)
-                size += len(chunk)
-                if size > MAX_RESPONSE_BYTES:
-                    raise LLMError(f"{url} sent more than {MAX_RESPONSE_BYTES:,} bytes; giving up")
-                if time.monotonic() > deadline:
-                    raise TimeoutError
-            raw = b"".join(chunks)
+            raw = _read_body(response, deadline, MAX_RESPONSE_BYTES, url)
     except LLMError:
         raise
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:2000]
-        raise LLMError(f"HTTP {e.code} from {url}: {detail}", retryable=e.code in RETRY_STATUS) from None
+        try:
+            body = _read_body(e, deadline, MAX_ERROR_BYTES, url, truncate=True)
+        except (OSError, http.client.HTTPException):
+            body = b""
+        raise LLMError(f"HTTP {e.code} from {url}: {body.decode('utf-8', 'replace')[:2000]}",
+                       retryable=e.code in RETRY_STATUS, retry_after=_retry_after(e.headers)) from None
     except urllib.error.URLError as e:
         timed_out = isinstance(e.reason, TimeoutError)
         refused = isinstance(e.reason, ConnectionRefusedError)
@@ -152,6 +180,11 @@ def extract_inline_tool_calls(content: str, known: set[str]) -> list[ToolCall]:
             continue
         name = obj.get("name")
         args = obj.get("arguments", obj.get("parameters", {}))
+        if isinstance(args, str):  # OpenAI-style: the arguments object as JSON text
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                continue
         if name in known and isinstance(args, dict):
             calls.append(ToolCall(id=f"inline_{i}", name=name, arguments=json.dumps(args)))
     return calls
@@ -177,14 +210,15 @@ class _Backend:
         self._ids = itertools.count()
 
     def _post(self, url: str, body: dict, headers: dict) -> dict:
-        """POST with retries for transient failures: 1s, then 3s, then give up."""
+        """POST with retries for transient failures: 1s, then 3s, or longer if the
+        server's Retry-After asks for it (capped at a minute), then give up."""
         for attempt in range(self.cfg.retries + 1):
             try:
                 return self.post(url, body, headers, self.cfg.request_timeout)
             except LLMError as e:
                 if not e.retryable or attempt == self.cfg.retries:
                     raise
-                self.sleep(3 ** attempt)
+                self.sleep(min(MAX_RETRY_WAIT, max(3 ** attempt, e.retry_after or 0)))
         raise AssertionError("unreachable")
 
     def chat(self, messages: list[dict], tools: list[dict] | None) -> Reply:

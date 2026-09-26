@@ -106,6 +106,17 @@ def test_output_redirected_to_a_legacy_codepage_does_not_crash(tmp_path, monkeyp
     assert raw.getvalue().rstrip().endswith(b"done ? ?")
 
 
+def test_printer_neutralises_escape_sequences_from_files_and_models():
+    out = io.StringIO()
+    p = cli.Printer(out)
+    p("tool_result", ("read_file", "line one\n\x1b[2K\x1b[1Ahidden\rAllow? run: ls\tok"))
+    p("assistant_text", "done\x1b]0;title\x07")
+    text = out.getvalue()
+    assert "\x1b" not in text and "\r" not in text and "\x07" not in text
+    assert "\\x1b[2K" in text and "\\r" in text  # shown, not obeyed
+    assert "line one\n" in text and "\tok" in text  # newlines and tabs still lay out normally
+
+
 def test_printer_formats_events():
     out = io.StringIO()
     p = cli.Printer(out)
