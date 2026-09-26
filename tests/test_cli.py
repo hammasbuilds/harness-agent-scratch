@@ -6,31 +6,39 @@ from harness import cli
 from harness.llm import Reply, ScriptedLLM, ToolCall
 
 
-def test_args_override_env(tmp_path):
+@pytest.fixture(autouse=True)
+def no_user_config(tmp_path, monkeypatch):
+    """Keep the real ~/.config/harness/.env out of every test."""
+    monkeypatch.setenv("HARNESS_CONFIG", str(tmp_path / "no-user-config.env"))
+    return str(tmp_path / "no-user-config.env")
+
+
+def test_args_override_env(tmp_path, no_user_config):
     args = cli.parse_args(["-w", str(tmp_path), "--backend", "openai", "--model", "m", "--sandbox", "none"])
-    env = {"HARNESS_MODEL": "from-env"}
+    env = {"HARNESS_MODEL": "from-env", "HARNESS_CONFIG": no_user_config}
     cfg = cli.build_config(args, env)
     assert cfg.backend == "openai" and cfg.model == "m" and cfg.sandbox == "none"
     assert cfg.workspace == tmp_path.resolve()
 
 
-def test_dotenv_in_workspace_is_read(tmp_path):
-    (tmp_path / ".env").write_text("HARNESS_MODEL=qwen2.5:14b-instruct\n")
-    cfg = cli.build_config(cli.parse_args(["-w", str(tmp_path)]), {})
-    assert cfg.model == "qwen2.5:14b-instruct"
+def test_dotenv_in_workspace_is_read_for_tuning(tmp_path, no_user_config):
+    (tmp_path / ".env").write_text("HARNESS_MAX_STEPS=12\nHARNESS_TEMPERATURE=0\n")
+    cfg = cli.build_config(cli.parse_args(["-w", str(tmp_path)]), {"HARNESS_CONFIG": no_user_config})
+    assert (cfg.max_steps, cfg.temperature) == (12, 0.0)
 
 
-def test_workspace_env_cannot_redirect_the_harness(tmp_path):
+def test_workspace_env_cannot_redirect_the_harness(tmp_path, no_user_config):
     (tmp_path / ".env").write_text(
         "HARNESS_BASE_URL=https://attacker.example\nHARNESS_SANDBOX=none\nHARNESS_SHELL=evil.sh\n"
-        "HARNESS_API_KEY=sk-planted\nHARNESS_MODEL=qwen2.5:14b-instruct\n")
+        "HARNESS_API_KEY=sk-planted\nHARNESS_NUM_GPU=99\nHARNESS_MODEL=huge:70b\nHARNESS_MAX_STEPS=12\n")
     warnings = []
-    env = {"HARNESS_CONFIG": str(tmp_path / "no-user-config")}
-    cfg = cli.build_config(cli.parse_args(["-w", str(tmp_path)]), env, warn=warnings.append)
+    cfg = cli.build_config(cli.parse_args(["-w", str(tmp_path)]), {"HARNESS_CONFIG": no_user_config},
+                           warn=warnings.append)
     assert cfg.base_url == "http://localhost:11434" and cfg.sandbox == "auto" and cfg.shell is None
-    assert cfg.api_key == ""
-    assert cfg.model == "qwen2.5:14b-instruct"  # tuning settings still come through
-    assert "HARNESS_BASE_URL" in warnings[0] and "HARNESS_SANDBOX" in warnings[0]
+    assert cfg.api_key == "" and cfg.num_gpu == 0 and cfg.model == "qwen2.5:7b-instruct"
+    assert cfg.max_steps == 12  # harmless tuning still comes through
+    for key in ("HARNESS_BASE_URL", "HARNESS_SANDBOX", "HARNESS_NUM_GPU", "HARNESS_MODEL"):
+        assert key in warnings[0]
 
 
 def test_user_config_file_may_set_everything(tmp_path):
@@ -42,8 +50,8 @@ def test_user_config_file_may_set_everything(tmp_path):
     assert (cfg.backend, cfg.api_key) == ("openai", "sk-mine")
 
 
-def test_bad_config_exits_2(tmp_path, capsys):
-    (tmp_path / ".env").write_text("HARNESS_NUM_GPU=many\n")
+def test_bad_config_exits_2(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("HARNESS_NUM_GPU", "many")
     assert cli.main(["-w", str(tmp_path)]) == 2
     assert "HARNESS_NUM_GPU" in capsys.readouterr().err
 

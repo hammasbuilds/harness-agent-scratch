@@ -162,6 +162,51 @@ def test_plain_commands_still_run_under_cmd():
     assert classify("type notes.txt", cmd_shell=True) == ASK  # `type` is not on the list
 
 
+@pytest.fixture
+def box_ws(tmp_path):
+    ws = (tmp_path / "ws").resolve()
+    (ws / "src").mkdir(parents=True)
+    (ws / "a.txt").write_text("a")
+    (ws / "src" / "m.py").write_text("x")
+    (tmp_path / "secret.txt").write_text("s")
+    return ws
+
+
+@pytest.mark.parametrize("command", [
+    "cat a.txt|&rm a.txt",  # |& pipes stderr too; it was once read as an argument and rm ran
+    "(rm a.txt)",
+    "ls; (rm a.txt)",
+    "cat {../secret.txt,a.txt}",  # brace expansion can produce any path
+    "cat {/etc/passwd,x}",
+    "grep -f../secret.txt x",  # path glued to a flag
+    "grep -f/etc/passwd x",
+    "cat .*",  # can match .. in some shells
+    "ls .?*",
+    "cat ../*.txt",
+    "cat /et*/passwd",  # decided by the fixed prefix, whatever exists on this machine
+])
+def test_second_review_bypasses_now_ask(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+@pytest.mark.parametrize("command", [
+    "cat *", "cat src/*.py", "grep -rn TODO src", "ls -la", "head -n 5 a.txt", "grep -c x a.txt",
+    "wc -l src/m.py", "git log --oneline -5", "ls src/..", "find . -name '*.py'", "grep -E 'a|b' a.txt",
+])
+def test_everyday_commands_still_run_without_asking(box_ws, command):
+    assert classify(command, box_ws) == ALLOW
+
+
+def test_a_symlink_out_of_the_workspace_is_followed(box_ws):
+    try:
+        (box_ws / "link").symlink_to(box_ws.parent, target_is_directory=True)
+    except OSError:
+        pytest.skip("this account cannot create symlinks (Windows without developer mode)")
+    assert classify("cat link/secret.txt", box_ws) == ASK
+    assert classify("cat li*/secret.txt", box_ws) == ASK
+    assert classify("cat a.txt", box_ws) == ALLOW
+
+
 def test_rm_rf_on_a_subfolder_asks_rather_than_denies():
     assert classify("rm -rf ./build") == ASK
     assert classify("rm -rf /tmp/scratch") == ASK

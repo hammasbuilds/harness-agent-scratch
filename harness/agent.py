@@ -194,14 +194,17 @@ class Agent:
         the start of the prompt, system prompt included. So cut this turn's tool
         outputs to a short head, oldest first, the latest one last."""
         budget = self.cfg.compact_at * self.cfg.context_limit
-        if self.context_tokens() <= budget:
+        tokens = self.context_tokens()
+        if tokens <= budget:
             return
         for m in [m for m in self.messages if m["role"] == "tool" and not m.get("trimmed")]:
             text = m.get("content") or ""
             if len(text) > STRIPPED_KEEP:
+                before = estimate_tokens([m])
                 m["content"] = text[:STRIPPED_KEEP] + f"\n[rest of this output ({len(text)} characters) removed to fit the context]"
                 m["trimmed"] = True
-                if self.context_tokens() <= budget:
+                tokens -= before - estimate_tokens([m])  # one message re-measured, not the whole request
+                if tokens <= budget:
                     break
         tokens = self.context_tokens()
         self.on_event("squeezed", (tokens, int(budget)))

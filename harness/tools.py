@@ -24,6 +24,7 @@ from typing import Callable, Mapping
 from . import permissions
 from .config import Config
 from .context import fingerprint
+from .llm import LLMError
 from .sandbox import Sandbox, find_shell
 from .skills import Skill
 from .todos import TodoError, TodoList
@@ -352,17 +353,23 @@ class Toolbox:
             raise ToolError(f"{self._show(p)} changed on disk since you read it; read it again first")
 
     @staticmethod
-    def _load(p: Path) -> tuple[str, bool, str]:
-        """(text with \\n line endings, whether the file used \\r\\n, its encoding)."""
+    def _load(p: Path) -> tuple[str, str, str]:
+        """(raw text, line-ending style "lf" | "crlf" | "mixed", encoding)."""
         text, encoding = decode(p.read_bytes())
-        return text.replace("\r\n", "\n"), "\r\n" in text, encoding
+        crlf = text.count("\r\n")
+        style = "lf" if crlf == 0 else "crlf" if crlf == text.count("\n") else "mixed"
+        return text, style, encoding
 
-    def _save(self, p: Path, text: str, crlf: bool, encoding: str = "utf-8") -> None:
-        # newline="" writes exactly what we give it; the model edits with \n and
-        # a CRLF file stays CRLF instead of silently changing every line.
-        text = text.replace("\r\n", "\n")
+    def _save(self, p: Path, text: str, style: str, encoding: str = "utf-8") -> None:
+        # The model edits with \n. A CRLF file goes back as CRLF and an LF file as
+        # LF, instead of every line changing; a mixed file is written exactly as
+        # the edit left it, since there is no single style to restore.
+        if style != "mixed":
+            text = text.replace("\r\n", "\n")
+            if style == "crlf":
+                text = text.replace("\n", "\r\n")
         try:
-            data = (text.replace("\n", "\r\n") if crlf else text).encode(encoding)
+            data = text.encode(encoding)
         except UnicodeEncodeError:
             raise ToolError(f"{self._show(p)} is stored as {encoding}, which cannot hold some of the new "
                             "characters; keep to characters that encoding supports") from None
@@ -390,9 +397,11 @@ class Toolbox:
         out_cap, err_cap = _Capture(proc.stdout), _Capture(proc.stderr)
         try:
             proc.wait(timeout=timeout)
+            status = f"[exit code {proc.returncode}]"
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
-            raise ToolError(f"command timed out after {timeout}s") from None
+            # Keep what it printed: a hung test run's last lines say where it hung.
+            status = f"[timed out after {timeout}s and was killed; output so far is above]"
         except BaseException:  # Ctrl-C: do not leave the command running behind the agent
             _kill_tree(proc)
             raise
@@ -401,7 +410,7 @@ class Toolbox:
         out, err = strip_ansi(out_cap.text()), strip_ansi(err_cap.text())
         if err:
             out += ("\n" if out and not out.endswith("\n") else "") + "[stderr]\n" + err
-        return f"{out.rstrip()}\n[exit code {proc.returncode}]".lstrip()
+        return f"{out.rstrip()}\n{status}".lstrip()
 
     def read_file(self, path: str, offset: int = 1, limit: int = 2000) -> str:
         p = self._resolve(path)
@@ -415,7 +424,7 @@ class Toolbox:
             start_bytes = f.read(8192)
         if b"\0" in start_bytes and not any(start_bytes.startswith(bom) for bom, _ in _BOMS):
             raise ToolError(f"{self._show(p)} is a binary file ({size:,} bytes); it cannot be shown as text")
-        text, _, _ = self._load(p)
+        text = self._load(p)[0].replace("\r\n", "\n")
         if not self._is_spill(p):  # spill files vanish at the end of the turn; never track them
             self.seen[p] = fingerprint(p)
         lines = text.split("\n")
@@ -429,14 +438,16 @@ class Toolbox:
     def write_file(self, path: str, content: str) -> str:
         p = self._resolve(path)
         self._check_write(p)
-        crlf, encoding = False, "utf-8"
+        style, encoding = "lf", "utf-8"
         if p.exists():
             if p.is_dir():
                 raise ToolError(f"{self._show(p)} is a folder")
             self._require_fresh(p)
-            _, crlf, encoding = self._load(p)
+            _, style, encoding = self._load(p)
+            if style == "mixed":
+                style = "lf"  # a whole new content has no old lines to keep
         p.parent.mkdir(parents=True, exist_ok=True)
-        self._save(p, content, crlf, encoding)
+        self._save(p, content, style, encoding)
         return f"wrote {len(content)} characters to {self._show(p)}"
 
     def str_replace(self, path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
@@ -449,15 +460,22 @@ class Toolbox:
             raise ToolError("old_string is empty")
         if old_string == new_string:
             raise ToolError("old_string and new_string are identical")
-        text, crlf, encoding = self._load(p)
+        text, style, encoding = self._load(p)
         old, new = old_string.replace("\r\n", "\n"), new_string.replace("\r\n", "\n")
+        if style == "mixed":
+            # Edit the raw text. read_file showed \n everywhere, so an old_string
+            # that spans CRLF lines is tried in its CRLF form too.
+            if old not in text and old.replace("\n", "\r\n") in text:
+                old, new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")
+        else:
+            text = text.replace("\r\n", "\n")
         count = text.count(old)
         if count == 0:
             raise ToolError(f"old_string not found in {self._show(p)}; read the file again and copy it exactly")
         if count > 1 and not replace_all:
             raise ToolError(f"old_string occurs {count} times; add surrounding lines to make it unique, "
                             "or set replace_all to true")
-        self._save(p, text.replace(old, new) if replace_all else text.replace(old, new, 1), crlf, encoding)
+        self._save(p, text.replace(old, new) if replace_all else text.replace(old, new, 1), style, encoding)
         return f"replaced {count if replace_all else 1} occurrence(s) in {self._show(p)}"
 
     def read_skill(self, name: str) -> str:
@@ -479,4 +497,9 @@ class Toolbox:
     def task(self, prompt: str) -> str:
         if self.subagent is None:
             raise ToolError("subagents are not available here")
-        return self.subagent(prompt)
+        try:
+            return self.subagent(prompt)
+        except LLMError as e:
+            # The subagent's model call failed; the main agent can still go on
+            # without its answer, so this is a tool error, not the end of the turn.
+            raise ToolError(f"the subagent failed: {e}") from None

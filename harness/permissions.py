@@ -13,6 +13,8 @@ on Windows there is none, so the prompt is the only guard there.
 
 from __future__ import annotations
 
+import glob
+import os
 import re
 import shlex
 from pathlib import Path
@@ -79,24 +81,52 @@ def is_secret_file(name: str) -> bool:
     return bool(_SECRET_FILE.match(re.split(r"[\\/]", name)[-1]))
 
 
-def points_outside(token: str, workspace: Path) -> bool:
-    """True if `token` looks like a path and resolves outside the workspace.
-
-    Only absolute paths, `~` paths and paths with a `..` part are checked; a
-    bare word is relative to the workspace by construction. A grep pattern
-    such as "/api/" also looks absolute, so it asks: a false alarm, not a leak.
-    """
-    if token in HARMLESS_PATHS:
-        return False
-    parts = re.split(r"[\\/]", token)
-    if not (token.startswith(("/", "~", "\\\\")) or _DRIVE.match(token) or ".." in parts):
-        return False
+def _resolves_outside(path: str, workspace: Path) -> bool:
     try:
-        p = Path(token).expanduser()
+        p = Path(path).expanduser()
         resolved = (p if p.is_absolute() else workspace / p).resolve()
     except (OSError, RuntimeError, ValueError):
         return True
     return not (resolved == workspace or resolved.is_relative_to(workspace))
+
+
+def points_outside(token: str, workspace: Path) -> bool:
+    """True if `token` could name something outside the workspace.
+
+    - Absolute, `~` and `..` paths are resolved and checked. A grep pattern
+      such as "/api/" also looks absolute, so it asks: a false alarm, not a leak.
+    - Anything that exists in the workspace is resolved too, which follows a
+      symlink that points out of it (a cloned repository can ship one).
+    - Globs are expanded the way the shell would and every match is checked;
+      a hidden-file glob such as `.*` could match `..` and always asks.
+    - Brace expansion can produce any path at all, so `{` always asks.
+    - A path glued to a flag (`grep -f../secret`) is checked from where it starts.
+    """
+    if token in HARMLESS_PATHS:
+        return False
+    if "{" in token or "}" in token:
+        return True
+    if token.startswith("-"):
+        glued = re.search(r"[~/\\]|\.\.|[A-Za-z]:[\\/]", token)
+        if not glued:
+            return False
+        token = token[glued.start():]
+    parts = re.split(r"[\\/]", token)
+    pathlike = token.startswith(("/", "~", "\\\\")) or _DRIVE.match(token) or ".." in parts
+    if any(c in token for c in "*?["):
+        if any(part.startswith(".") and any(c in part for c in "*?[") for part in parts):
+            return True
+        # The fixed part before the first wildcard decides it for an absolute or
+        # `..` glob, whatever happens to exist on this machine (`/et*/passwd`).
+        fixed = re.split(r"[*?\[]", token, maxsplit=1)[0]
+        if pathlike and _resolves_outside(fixed or ".", workspace):
+            return True
+        p = Path(token).expanduser()
+        pattern = str(p if p.is_absolute() else workspace / token)
+        return any(_resolves_outside(match, workspace) for match in glob.glob(pattern))
+    if pathlike or os.path.lexists(workspace / token):
+        return _resolves_outside(token, workspace)
+    return False
 
 
 def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = False) -> str:
@@ -142,6 +172,11 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
         elif set(tok) <= set("<"):
             read_targets.append(target)  # `< file` reads it
             i += 1
+        elif set(tok) <= set("&|;<>()"):
+            # Any other operator (`|&` pipes stderr too, `(` opens a subshell) is
+            # one this parser does not model; treating it as an argument once let
+            # `cat a|&rm a` run rm without asking.
+            return ASK
         else:
             segments[-1].append(tok)
         i += 1

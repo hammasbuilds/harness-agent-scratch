@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from harness.config import Config, load_dotenv
+from harness.config import PROJECT_SETTINGS, Config, load_dotenv
 
 
 def test_defaults_keep_ollama_on_the_cpu(tmp_path):
@@ -51,6 +51,41 @@ def test_skills_dirs_env_is_an_override(tmp_path):
 def test_impossible_settings_fail_at_startup(tmp_path, env, message):
     with pytest.raises(ValueError, match=message):
         Config.from_env(tmp_path, env)
+
+
+def test_context_limit_cannot_exceed_ollamas_num_ctx(tmp_path):
+    with pytest.raises(ValueError, match="above num_ctx"):
+        Config.from_env(tmp_path, {"HARNESS_CONTEXT_LIMIT": "100000", "HARNESS_NUM_CTX": "8192"})
+    # a hosted model has no num_ctx to respect
+    assert Config.from_env(tmp_path, {"HARNESS_BACKEND": "openai", "HARNESS_CONTEXT_LIMIT": "100000"}).context_limit == 100000
+
+
+def test_every_setting_is_reachable_from_the_environment(tmp_path):
+    cfg = Config.from_env(tmp_path, {"HARNESS_SUBAGENT_MAX_STEPS": "5", "HARNESS_COMPACT_AT": "0.9",
+                                     "HARNESS_COMPACT_TO": "0.3"})
+    assert (cfg.subagent_max_steps, cfg.compact_at, cfg.compact_to) == (5, 0.9, 0.3)
+
+
+@pytest.mark.parametrize("line, value", [
+    ('HARNESS_MODEL="a # b"', "a # b"),
+    ("HARNESS_MODEL=qwen2.5:7b  # the small one", "qwen2.5:7b"),
+    ("HARNESS_MODEL=\"'x'\"", "'x'"),  # one pair of quotes, not every quote character
+    ("HARNESS_MODEL='q' # note", "q"),
+    ("HARNESS_MODEL=a#b", "a#b"),  # no space before #, not a comment
+])
+def test_dotenv_values(tmp_path, line, value):
+    (tmp_path / ".env").write_text(line + "\n")
+    env = {}
+    load_dotenv(tmp_path / ".env", env)
+    assert env["HARNESS_MODEL"] == value
+
+
+def test_project_env_is_an_allowlist(tmp_path):
+    (tmp_path / ".env").write_text("HARNESS_NUM_GPU=99\nHARNESS_MODEL=big\nHARNESS_MAX_STEPS=10\nOTHER=1\n")
+    env = {}
+    ignored = load_dotenv(tmp_path / ".env", env, only=PROJECT_SETTINGS)
+    assert env == {"HARNESS_MAX_STEPS": "10"}
+    assert ignored == ["HARNESS_NUM_GPU", "HARNESS_MODEL"]  # OTHER is not ours to mention
 
 
 def test_compaction_thresholds_must_be_ordered(tmp_path):

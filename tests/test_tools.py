@@ -224,8 +224,10 @@ def test_timeout(cfg, allow, workspace):
     start = time.time()
     # The shell's child keeps the pipes open; without killing the whole tree this
     # returned only after the full 5 seconds (and never, for a server).
-    assert run(box, "bash", command="sleep 5", timeout=1) == "error: command timed out after 1s"
+    out = run(box, "bash", command="echo started; sleep 5", timeout=1)
     assert time.time() - start < 4.5
+    # What it printed before hanging is kept: it says where it hung.
+    assert out == "started\n[timed out after 1s and was killed; output so far is above]"
 
 
 @needs_posix_shell
@@ -331,6 +333,22 @@ def test_bom_files_keep_their_encoding(box, workspace, encoding, bom):
     assert run(box, "read_file", path="ps.txt") == "line one\nline two\n"  # UTF-16 has NULs but is text
     run(box, "str_replace", path="ps.txt", old_string="two", new_string="2")
     assert f.read_bytes() == "line one\r\nline 2\r\n".encode(encoding)
+
+
+def test_mixed_line_endings_are_left_alone_except_where_edited(box, workspace):
+    f = workspace / "mixed.txt"
+    f.write_bytes(b"one\ntwo\r\nthree\n")
+    run(box, "read_file", path="mixed.txt")
+    run(box, "str_replace", path="mixed.txt", old_string="three", new_string="3")
+    assert f.read_bytes() == b"one\ntwo\r\n3\n"  # was rewritten to all-CRLF once
+
+
+def test_mixed_file_edit_spanning_a_crlf_line(box, workspace):
+    f = workspace / "mixed.txt"
+    f.write_bytes(b"a\r\nb\r\nc\n")
+    run(box, "read_file", path="mixed.txt")
+    assert run(box, "str_replace", path="mixed.txt", old_string="a\nb", new_string="A\nB").startswith("replaced")
+    assert f.read_bytes() == b"A\r\nB\r\nc\n"
 
 
 def test_write_file_does_not_double_carriage_returns(box, workspace):
@@ -455,3 +473,13 @@ def test_write_todos_and_validation(box):
 
 def test_task_without_a_subagent(box):
     assert run(box, "task", prompt="x") == "error: subagents are not available here"
+
+
+def test_a_failing_subagent_is_a_tool_error_not_the_end_of_the_turn(box):
+    from harness.llm import LLMError
+
+    def broken(prompt):
+        raise LLMError("HTTP 503 from server")
+
+    box.subagent = broken
+    assert run(box, "task", prompt="x") == "error: the subagent failed: HTTP 503 from server"

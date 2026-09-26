@@ -280,6 +280,20 @@ def test_truncated_replies_are_flagged(tmp_path):
     assert done.chat(HISTORY, None).truncated is False
 
 
+@pytest.mark.parametrize("backend", [OllamaBackend, OpenAIBackend])
+@pytest.mark.parametrize("body", [
+    [], "text", 42, None,
+    {"message": None, "choices": [{"message": None}]},
+    {"message": {"tool_calls": ["x"]}, "choices": [{"message": {"tool_calls": ["x"]}}]},
+    {"message": {"tool_calls": [{"function": "bash"}]}, "choices": [{"message": {"tool_calls": [{"function": "bash"}]}}]},
+    {"choices": "none"},
+])
+def test_wrong_shaped_json_is_an_llm_error(tmp_path, backend, body):
+    kind = "openai" if backend is OpenAIBackend else "ollama"
+    with pytest.raises(LLMError):
+        backend(cfg(tmp_path, backend=kind), FakePost(body)).chat(HISTORY, TOOLS)
+
+
 def test_openai_content_as_typed_parts(tmp_path):
     post = FakePost({"choices": [{"message": {"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}}]})
     assert OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, None).content == "ab"

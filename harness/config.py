@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -13,41 +14,56 @@ DEFAULT_BASE_URLS = {
 }
 
 
-# Settings that decide where requests go, what runs commands and what is
-# confined. A project's own .env (possibly from a cloned, untrusted repo, or
-# written by the model itself) must not be able to set these: a base URL there
-# would send the user's real API key to someone else's server.
-TRUSTED_ONLY = frozenset({
-    "HARNESS_BACKEND", "HARNESS_BASE_URL", "HARNESS_API_KEY",
-    "HARNESS_SHELL", "HARNESS_SANDBOX", "HARNESS_SKILLS_DIRS",
+# The only settings a project's own .env may change. It may come from a cloned,
+# untrusted repository, or be written by the model itself, so it is an
+# allowlist of harmless tuning: not where requests go (a base URL there would
+# send the user's real API key elsewhere), not what runs commands or how they
+# are confined, not the model, and not num_gpu, which keeps a model that loads
+# onto the GPU from pushing a training job out of memory.
+PROJECT_SETTINGS = frozenset({
+    "HARNESS_TEMPERATURE", "HARNESS_MAX_STEPS", "HARNESS_SUBAGENT_MAX_STEPS",
+    "HARNESS_CONTEXT_LIMIT", "HARNESS_COMPACT_AT", "HARNESS_COMPACT_TO",
 })
+
+_QUOTED = re.compile(r"""(["'])(.*?)\1\s*(#.*)?$""")
 
 
 def user_config_file(env: Mapping[str, str]) -> Path:
     return Path(env.get("HARNESS_CONFIG") or Path.home() / ".config" / "harness" / ".env")
 
 
-def load_dotenv(path: Path, environ: dict | None = None, skip: frozenset[str] = frozenset()) -> list[str]:
+def _dotenv_value(raw: str) -> str:
+    """`"a # b"` keeps its hash; `a  # note` loses the comment; one pair of
+    matching quotes is removed, never more."""
+    raw = raw.strip()
+    quoted = _QUOTED.match(raw)
+    if quoted:
+        return quoted.group(2)
+    return re.split(r"\s+#", raw, maxsplit=1)[0].strip()
+
+
+def load_dotenv(path: Path, environ: dict | None = None, only: frozenset[str] | None = None) -> list[str]:
     """Fill unset variables from a KEY=VALUE file. Variables already set win.
 
-    Keys in `skip` are not loaded; their names are returned so the caller can
-    say they were ignored.
+    With `only`, other keys are not loaded; the HARNESS_ ones among them are
+    returned so the caller can say they were ignored.
     """
     environ = os.environ if environ is None else environ
     if not path.is_file():
         return []
-    skipped = []
+    ignored = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
         key = key.strip().removeprefix("export ").strip()
-        if key in skip:
-            skipped.append(key)
+        if only is not None and key not in only:
+            if key.startswith("HARNESS_"):
+                ignored.append(key)
             continue
-        environ.setdefault(key, value.strip().strip('"').strip("'"))
-    return skipped
+        environ.setdefault(key, _dotenv_value(value))
+    return ignored
 
 
 @dataclass
@@ -86,6 +102,11 @@ class Config:
                 problems.append(f"{name} must be at least {low}, got {getattr(self, name)}")
         if self.request_timeout <= 0:
             problems.append("request_timeout must be positive")
+        if self.backend == "ollama" and self.context_limit > self.num_ctx:
+            # Ollama silently drops the start of a prompt longer than num_ctx, so
+            # compaction must trigger below it.
+            problems.append(f"context_limit ({self.context_limit}) is above num_ctx ({self.num_ctx}); "
+                            "Ollama would cut the prompt before compaction ever ran")
         if problems:
             raise ValueError("invalid settings: " + "; ".join(problems))
 
@@ -124,8 +145,11 @@ class Config:
             # With Ollama the real ceiling is num_ctx; past it Ollama drops the
             # start of the prompt without telling anyone.
             context_limit=number("CONTEXT_LIMIT", num_ctx if backend == "ollama" else 64000, int),
+            compact_at=number("COMPACT_AT", 0.85, float),
+            compact_to=number("COMPACT_TO", 0.35, float),
             output_cap=number("OUTPUT_CAP", 3000, int),
             max_steps=number("MAX_STEPS", 40, int),
+            subagent_max_steps=number("SUBAGENT_MAX_STEPS", 20, int),
             shell=env.get("HARNESS_SHELL") or None,
             # An override, not an extra path: when set, only these folders are searched.
             skills_dirs=[Path(p) for p in skills_raw.split(os.pathsep) if p] if skills_raw is not None else None,

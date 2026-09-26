@@ -167,6 +167,29 @@ class _Backend:
                 self.sleep(3 ** attempt)
         raise AssertionError("unreachable")
 
+    def chat(self, messages: list[dict], tools: list[dict] | None) -> Reply:
+        url, headers = self._endpoint()
+        data = self._post(url, self.request_body(messages, tools), headers)
+        # Valid JSON in the wrong shape ([] or {"message": null}) must fail as an
+        # LLMError the CLI reports, not as an AttributeError that ends the session.
+        try:
+            if not isinstance(data, dict):
+                raise TypeError(f"expected a JSON object, got {type(data).__name__}")
+            return self._parse(data, tools, url)
+        except LLMError:
+            raise
+        except (AttributeError, TypeError, KeyError, IndexError, ValueError) as e:
+            raise LLMError(f"{url} answered in an unexpected shape ({e}): {str(data)[:300]}") from None
+
+    def _endpoint(self) -> tuple[str, dict]:
+        raise NotImplementedError
+
+    def _parse(self, data: dict, tools: list[dict] | None, url: str) -> Reply:
+        raise NotImplementedError
+
+    def request_body(self, messages: list[dict], tools: list[dict] | None) -> dict:
+        raise NotImplementedError
+
     def _finish(self, content: str, calls: list[ToolCall], usage: dict, tools: list[dict] | None,
                 truncated: bool = False) -> Reply:
         if not calls and tools:
@@ -214,12 +237,15 @@ class OllamaBackend(_Backend):
             ]
         return out
 
-    def chat(self, messages: list[dict], tools: list[dict] | None) -> Reply:
-        base = self.cfg.base_url.rstrip("/").removesuffix("/v1")
-        data = self._post(f"{base}/api/chat", self.request_body(messages, tools), {})
+    def _endpoint(self) -> tuple[str, dict]:
+        return f"{self.cfg.base_url.rstrip('/').removesuffix('/v1')}/api/chat", {}
+
+    def _parse(self, data: dict, tools: list[dict] | None, url: str) -> Reply:
         if "error" in data:
             raise LLMError(f"ollama: {data['error']}")
-        msg = data.get("message") or {}
+        msg = data.get("message")
+        if not isinstance(msg, dict):
+            raise TypeError("no message object in the reply")
         calls = []
         for tc in msg.get("tool_calls") or []:
             fn = tc.get("function") or {}
@@ -256,10 +282,11 @@ class OpenAIBackend(_Backend):
             out["content"] = msg.get("content") or None
         return out
 
-    def chat(self, messages: list[dict], tools: list[dict] | None) -> Reply:
+    def _endpoint(self) -> tuple[str, dict]:
         headers = {"Authorization": f"Bearer {self.cfg.api_key}"} if self.cfg.api_key else {}
-        url = f"{self.cfg.base_url.rstrip('/')}/chat/completions"
-        data = self._post(url, self.request_body(messages, tools), headers)
+        return f"{self.cfg.base_url.rstrip('/')}/chat/completions", headers
+
+    def _parse(self, data: dict, tools: list[dict] | None, url: str) -> Reply:
         if data.get("error"):
             raise LLMError(f"{url}: {data['error']}")
         try:

@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/models-local%20via%20ollama%20(CPU)-success" alt="models">
   <img src="https://img.shields.io/badge/API%20keys-none%20required-success" alt="api keys">
   <img src="https://img.shields.io/badge/dependencies-0-success" alt="dependencies">
-  <img src="https://img.shields.io/badge/tests-282-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-332-brightgreen" alt="tests">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license"></a>
 </p>
 
@@ -60,18 +60,18 @@ asserts that each request starts with the previous one.
 
 | | Step | Tests | What it does |
 |---|---|---|---|
-| 01 | [Model call](harness/llm.py) | 32 | One POST per call with `urllib`. Two backends, one `Reply`: Ollama's native `/api/chat` (the only Ollama endpoint that takes `num_gpu`/`num_ctx` per request) and any OpenAI-compatible `/chat/completions` (OpenRouter, DeepSeek, …). Retries rate limits, 5xx and dropped connections (not timeouts: on a CPU a timeout already cost minutes). Flags replies cut off at the output limit. Recovers tool calls a model wrote as text. |
-| 02 | [Tools](harness/tools.py) | 66 | `bash`, `read_file`, `write_file`, `str_replace`, `read_skill`, `write_todos`, `task`. Arguments checked against the schema, types included; every failure goes back to the model as text instead of ending the loop. Edits keep a file's encoding (UTF-8, UTF-16, Latin-1) and line endings byte for byte. |
+| 01 | [Model call](harness/llm.py) | 48 | One POST per call with `urllib`. Two backends, one `Reply`: Ollama's native `/api/chat` (the only Ollama endpoint that takes `num_gpu`/`num_ctx` per request) and any OpenAI-compatible `/chat/completions` (OpenRouter, DeepSeek, …). Retries rate limits, 5xx and dropped connections (not timeouts: on a CPU a timeout already cost minutes). Flags replies cut off at the output limit. Recovers tool calls a model wrote as text. |
+| 02 | [Tools](harness/tools.py) | 69 | `bash`, `read_file`, `write_file`, `str_replace`, `read_skill`, `write_todos`, `task`. Arguments checked against the schema, types included; every failure goes back to the model as text instead of ending the loop. Edits keep a file's encoding (UTF-8, UTF-16, Latin-1) and line endings byte for byte. |
 | 03 | [Agent loop](harness/agent.py) | 26 | `while` the model asks for tools: run them, append the results as `role: tool`, call again. Ctrl-C mid-tool still leaves every call with a result; a model repeating one call is told so. |
 | 04 | [Skills](harness/skills.py) | 9 | Finds `SKILL.md` under `~/.agents/skills` and `<workspace>/.agents/skills`; only name + description enter the system prompt, the body loads on demand, and files in a skill's folder are readable without a prompt. |
 | 05 | [Late injection](harness/context.py) | 13 | Date, git branch/commit, todo list and stale-file warnings, added after the transcript in a `<system-reminder>`. |
 | 06 | [Todos](harness/todos.py) | ↑ | The model rewrites the whole list each time; one item `in_progress` at a time. |
-| 07 | [Permissions](harness/permissions.py) | 88 | A command runs without asking only if every part is read-only, no flag makes it write or execute (`git log --output`, `rg --pre`, `sort -o`, `uniq IN OUT`), no argument leaves the workspace or names a credentials file, and nothing is `$`-expanded. `rm -rf /`, `mkfs`, fork bombs never run. |
+| 07 | [Permissions](harness/permissions.py) | 111 | A command runs without asking only if every part is read-only, no flag makes it write or execute (`git log --output`, `rg --pre`, `sort -o`, `uniq IN OUT`), no argument leaves the workspace or names a credentials file, and nothing is `$`-expanded. `rm -rf /`, `mkfs`, fork bombs never run. |
 | 08 | [Sandbox](harness/sandbox.py) | 12 | Linux: bubblewrap with a read-only root, private `/tmp` and `/run`, no network, own PID namespace. macOS: Seatbelt, writes only in the workspace and system temp folders, no network. Windows: none, and the CLI says so. |
 | 09 | [Output capping](harness/tools.py) | ↑ | Results over 3,000 characters are cut; the full text goes to `.harness/spill/` for `head`/`grep`, and is deleted when the turn ends. A command's output is held to its first and last 1M characters. Commands run without credential variables in their environment. |
 | 10 | [Compaction](harness/compaction.py) | 12 | Counts everything sent (system prompt, ~900 tokens of tool schemas, reminder, transcript). At 85% of the limit, finished turns become a capped, model-written handoff note; if the current turn alone is too big, its tool outputs are cut, oldest first. |
 | 11 | [Subagents](harness/subagent.py) | ↑ | `task` starts a fresh context with its own read-only toolbox: commands that would need a yes are refused, never asked. Its budget forces an answer before it overflows. Only its final answer returns. One level deep. |
-| 12 | [CLI](harness/cli.py) + [config](harness/config.py) | 24 | `harness` REPL or `harness -p "task"`. Settings from flags, the environment, `~/.config/harness/.env`, then the project's `.env`, which may not set where requests go or what runs commands. |
+| 12 | [CLI](harness/cli.py) + [config](harness/config.py) | 32 | `harness` REPL or `harness -p "task"`. Settings from flags, the environment, `~/.config/harness/.env`, then the project's `.env`, which may set only harmless tuning (steps, temperature, compaction thresholds). |
 
 `↑` = covered by the test file of the row above (todos with context, capping with tools,
 subagents with the agent loop).
@@ -153,10 +153,12 @@ Local model (default): Ollama running, `ollama pull qwen2.5:7b-instruct`. Hosted
 
 Where settings come from, strongest first: command-line flags, the environment,
 `~/.config/harness/.env` (or the file `HARNESS_CONFIG` names), then the project's own `.env`.
-The project's `.env` may tune the model (`HARNESS_MODEL`, `HARNESS_NUM_CTX`, …) but not set
-`HARNESS_BACKEND`, `HARNESS_BASE_URL`, `HARNESS_API_KEY`, `HARNESS_SHELL`, `HARNESS_SANDBOX` or
-`HARNESS_SKILLS_DIRS`: a cloned repository, or the model itself, could otherwise point your real API
-key at someone else's server. Those lines are ignored with a warning.
+The project's `.env` is an allowlist: it may set only `HARNESS_TEMPERATURE`, `HARNESS_MAX_STEPS`,
+`HARNESS_SUBAGENT_MAX_STEPS`, `HARNESS_CONTEXT_LIMIT`, `HARNESS_COMPACT_AT` and `HARNESS_COMPACT_TO`.
+It can come from a cloned repository, or be written by the model after one approval, so it may not
+choose where requests go (a base URL there would send your real API key elsewhere), what runs
+commands, the sandbox, the model, or `HARNESS_NUM_GPU` (which keeps the model off a GPU a training
+job is using). Other `HARNESS_` lines there are ignored with a warning.
 
 Choosing a local model: **`qwen2.5:7b-instruct`** on CPU; `qwen2.5:14b-instruct` when a GPU is
 free. Avoid `qwen2.5-coder` as the main agent under Ollama: it tends to print the tool call as JSON
@@ -182,7 +184,7 @@ harness/
   config.py       HARNESS_* settings and .env
   cli.py          terminal front end
 demo.py           one task in a throwaway folder (--scripted for no model)
-tests/            282 tests; scripted model, real tools
+tests/            332 tests; scripted model, real tools
 ```
 
 ## Requirements
@@ -200,7 +202,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-282 tests, about 25 seconds. No network, no model, no GPU: a `ScriptedLLM` replays pre-written
+332 tests, about 35 seconds (one, following a symlink, is skipped on Windows accounts that cannot create symlinks). No network, no model, no GPU: a `ScriptedLLM` replays pre-written
 replies while the tools really run: files are written, `bash` really executes, subagents really run
 their own loop. HTTP handling is tested against a local `http.server` stub. The suite was also run
 in a fresh virtualenv holding only pytest, with `HOME` pointed at an empty folder, so it does not
@@ -234,6 +236,11 @@ proved each finding with a probe; every one below was reproduced, fixed and pinn
 - **`cat $HOME/.gitconfig` read outside the workspace without asking**, because the path check
   looked at the literal token. Anything with `$` now asks, and commands run without credential
   variables in their environment (`echo $GITHUB_TOKEN` printed the real token before).
+- **A second reviewer, then a probe of 50 shell tricks, found four more ways past the approver.**
+  `cat a|&rm a` ran `rm`: `|&` (pipe with stderr) was read as an argument. Brace expansion
+  (`cat {../secret,x}`), a path glued to a flag (`grep -f../secret`) and a glob or symlink leading
+  out of the workspace (`cat li*/secret`) all read outside it. Unknown operators, braces and
+  hidden-file globs now ask; globs are expanded and symlinks resolved before the check.
 - **The token budget ignored ~900 tokens of tool schemas.** With an 8,192-token Ollama context,
   compaction would have triggered only after the real prompt had overflowed, and Ollama drops the
   start of an overlong prompt (the system prompt) without an error.

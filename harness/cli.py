@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .agent import Agent
-from .config import TRUSTED_ONLY, Config, load_dotenv, user_config_file
+from .config import PROJECT_SETTINGS, Config, load_dotenv, user_config_file
 from .llm import LLMError, make_llm
 from .sandbox import SandboxUnavailable
 
@@ -74,14 +74,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace, env: dict, warn=lambda msg: print(msg, file=sys.stderr)) -> Config:
     """Settings, strongest first: command-line flags, the real environment, the
-    user's own config file, then the workspace .env for everything except
-    TRUSTED_ONLY settings (where requests go, what runs, what is confined)."""
+    user's own config file, then the workspace .env, which may set only
+    PROJECT_SETTINGS (harmless tuning)."""
     workspace = Path(args.workspace).resolve()
     load_dotenv(user_config_file(env), env)
-    ignored = load_dotenv(workspace / ".env", env, skip=TRUSTED_ONLY)
+    ignored = load_dotenv(workspace / ".env", env, only=PROJECT_SETTINGS)
     if ignored:
-        warn(f"warning: ignored {', '.join(ignored)} from {workspace / '.env'}; a project's .env may not set "
-             f"these. Put them in {user_config_file(env)} or the environment.")
+        warn(f"warning: ignored {', '.join(ignored)} from {workspace / '.env'}; a project's .env may set only "
+             f"{', '.join(sorted(PROJECT_SETTINGS))}. Put the rest in {user_config_file(env)} or the environment.")
     if args.backend:
         env["HARNESS_BACKEND"] = args.backend
     cfg = Config.from_env(workspace, env)
