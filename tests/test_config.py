@@ -104,6 +104,12 @@ def test_temperature_must_be_a_real_number_in_range(tmp_path, value):
         Config.from_env(tmp_path, {"HARNESS_TEMPERATURE": value})
 
 
+def test_the_reply_cap_must_leave_room_for_the_prompt(tmp_path):
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        Config.from_env(tmp_path, {"HARNESS_MAX_OUTPUT_TOKENS": "6000"})  # num_ctx 8192
+    assert Config.from_env(tmp_path, {}).max_output_tokens == 2048
+
+
 def test_compaction_thresholds_must_be_ordered(tmp_path):
     with pytest.raises(ValueError, match="compact_to"):
         Config(workspace=tmp_path, compact_at=0.3, compact_to=0.5)

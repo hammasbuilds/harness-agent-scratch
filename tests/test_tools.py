@@ -432,6 +432,15 @@ def test_ntfs_stream_names_cannot_read_a_secret_without_asking(box, workspace, d
     assert out.startswith("error:") and "sk-live" not in out
 
 
+def test_a_symlink_loop_is_a_tool_error_not_a_crash(box, monkeypatch):
+    # Python 3.10-3.12 on POSIX raise RuntimeError for `ln -s loop loop`; this
+    # Windows account cannot create one, so the error is simulated.
+    def loop(self, strict=False):
+        raise RuntimeError(f"Symlink loop from {str(self)!r}")
+    monkeypatch.setattr(Path, "resolve", loop)
+    assert run(box, "read_file", path="loop").startswith("error: loop: Symlink loop")
+
+
 def test_deeply_nested_arguments_are_an_error_not_a_crash(box):
     assert box.call("read_file", "[" * 100_000).startswith("error: arguments for read_file could not be read")
 

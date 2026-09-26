@@ -49,6 +49,14 @@ def test_ollama_request_forces_cpu_and_sets_context(tmp_path):
     assert timeout == 900.0
 
 
+def test_reply_length_is_capped_on_both_backends(tmp_path):
+    post = FakePost({"message": {"content": "ok"}, "choices": [{"message": {"content": "ok"}}]})
+    OllamaBackend(cfg(tmp_path, max_output_tokens=1024), post).chat(HISTORY, None)
+    OpenAIBackend(cfg(tmp_path, backend="openai", max_output_tokens=1024), post).chat(HISTORY, None)
+    assert post.calls[0][1]["options"]["num_predict"] == 1024
+    assert post.calls[1][1]["max_tokens"] == 1024
+
+
 def test_ollama_translates_history_to_native_shapes(tmp_path):
     post = FakePost({"message": {"content": "ok"}})
     OllamaBackend(cfg(tmp_path), post).chat(HISTORY, TOOLS)

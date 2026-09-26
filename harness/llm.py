@@ -328,6 +328,7 @@ class OllamaBackend(_Backend):
                 "num_gpu": self.cfg.num_gpu,
                 "num_thread": self.cfg.num_thread,
                 "num_ctx": self.cfg.num_ctx,
+                "num_predict": self.cfg.max_output_tokens,
                 "temperature": self.cfg.temperature,
             },
         }
@@ -379,7 +380,7 @@ class OllamaBackend(_Backend):
 class OpenAIBackend(_Backend):
     def request_body(self, messages: list[dict], tools: list[dict] | None) -> dict:
         body = {"model": self.cfg.model, "messages": [self._message(m) for m in messages],
-                "temperature": self.cfg.temperature}
+                "temperature": self.cfg.temperature, "max_tokens": self.cfg.max_output_tokens}
         if tools:
             body["tools"] = tools
         return body

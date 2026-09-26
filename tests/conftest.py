@@ -17,8 +17,10 @@ def workspace(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def cfg(workspace: Path) -> Config:
-    # skills_dirs=[] keeps the real ~/.agents/skills out of every test.
-    return Config(workspace=workspace, skills_dirs=[], sandbox="none")
+    # skills_dirs=[] keeps the real ~/.agents/skills out of every test. Tests
+    # shrink context_limit to a few thousand tokens to force compaction, so the
+    # reply reservation is scaled down with it.
+    return Config(workspace=workspace, skills_dirs=[], sandbox="none", max_output_tokens=256)
 
 
 class Approvals:

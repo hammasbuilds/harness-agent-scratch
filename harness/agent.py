@@ -97,6 +97,17 @@ class Agent:
         return (estimate_tokens([self.system_message(), {"role": "user", "content": self.reminder()}])
                 + self._schema_tokens)
 
+    def prompt_room(self) -> int:
+        """Tokens the prompt may use. The context holds the reply too; a prompt that
+        leaves no room for it makes Ollama shift the context mid-reply, dropping the
+        start of the prompt."""
+        return self.cfg.context_limit - self.cfg.max_output_tokens
+
+    def prompt_budget(self) -> float:
+        """Where compaction and squeezing start: compact_at of the context, and never
+        past the room left for the reply."""
+        return min(self.cfg.compact_at * self.cfg.context_limit, self.prompt_room())
+
     def context_tokens(self) -> int:
         return self.overhead_tokens() + estimate_tokens(self.messages)
 
@@ -195,7 +206,7 @@ class Agent:
         results can still overflow on its own, and Ollama would then silently drop
         the start of the prompt, system prompt included. So cut this turn's tool
         outputs to a short head, oldest first, the latest one last."""
-        budget = self.cfg.compact_at * self.cfg.context_limit
+        budget = self.prompt_budget()
         tokens = self.context_tokens()
         if tokens <= budget:
             return
@@ -223,17 +234,18 @@ class Agent:
                     break
         tokens = self.context_tokens()
         self.on_event("squeezed", (tokens, int(budget)))
-        if tokens > self.cfg.context_limit:
+        if tokens > self.prompt_room():
             # Sending it anyway would let Ollama silently drop the start of the
             # prompt, system prompt included; better to stop and say so.
             raise ContextOverflow(
-                f"the request (~{tokens} tokens) does not fit the {self.cfg.context_limit}-token context even after "
+                f"the request (~{tokens} tokens) does not fit the {self.prompt_room()} tokens the {self.cfg.context_limit}-token "
+                f"context leaves beside a {self.cfg.max_output_tokens}-token reply, even after "
                 "compacting and trimming; the current message is too large. Start over with /clear, send less at "
                 "once, or raise HARNESS_NUM_CTX.")
 
     def _compact_old_turns(self) -> None:
         limit = self.cfg.context_limit
-        if self.context_tokens() <= self.cfg.compact_at * limit:
+        if self.context_tokens() <= self.prompt_budget():
             return
         before, count = self.context_tokens(), len(self.messages)
         self.summary, self.messages = compact(

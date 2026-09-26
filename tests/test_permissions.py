@@ -269,6 +269,36 @@ def test_git_asks_when_its_config_may_come_from_elsewhere(tmp_path, extra):
     assert classify("git log", ws) == ASK
 
 
+def test_an_active_git_hook_makes_git_ask(tmp_path):
+    ws = tmp_path.resolve()
+    make_repo(ws)
+    (ws / ".git" / "hooks").mkdir()
+    (ws / ".git" / "hooks" / "pre-commit.sample").write_text("#!/bin/sh\n")
+    assert classify("git status", ws) == ALLOW  # git init's samples never run
+    (ws / ".git" / "hooks" / "post-index-change").write_text("#!/bin/sh\ntouch pwned\n")
+    assert classify("git status", ws) == ASK  # git status rewrites the index and would run it
+
+
+@pytest.mark.parametrize("marker", [".gitmodules", ".git/modules/lib/config"])
+def test_submodules_make_git_ask(tmp_path, marker):
+    ws = tmp_path.resolve()
+    make_repo(ws)
+    (ws / marker).parent.mkdir(parents=True, exist_ok=True)
+    (ws / marker).write_text("[submodule]\n")
+    assert classify("git status", ws) == ASK  # a submodule's own config is never checked
+
+
+@pytest.mark.parametrize("nested", ["lib/.git/config", "vendor/deep/pkg/.git"])
+def test_a_nested_repository_makes_git_ask(tmp_path, nested):
+    # A gitlink with no .gitmodules: git status recursed into lib/ and ran the
+    # clean filter its own config defined, with the top-level config plain.
+    ws = tmp_path.resolve()
+    make_repo(ws)
+    (ws / nested).parent.mkdir(parents=True, exist_ok=True)
+    (ws / nested).write_text('[filter "x"]\n\tclean = ./evil.sh\n')
+    assert classify("git status", ws) == ASK
+
+
 def test_find_reading_start_points_from_a_file_asks(box_ws):
     assert classify("find -files0-from list.txt -name x", box_ws) == ASK
 

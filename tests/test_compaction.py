@@ -1,3 +1,5 @@
+import pytest
+
 from harness.compaction import (COMPACT_SYSTEM, choose_cut, compact, estimate_tokens, fit_tokens,
                                 render_for_summary, text_tokens)
 from harness.llm import Reply, ScriptedLLM
@@ -16,6 +18,29 @@ def turn(n: int, size: int = 300) -> list[dict]:
 def test_estimate_is_pessimistic():
     msgs = [{"role": "user", "content": "a" * 3000}]
     assert estimate_tokens(msgs) > 3000 / 4  # a real tokenizer gives ~750 here
+
+
+# Real Qwen2.5 token counts for these exact 3,000-character samples, measured
+# with its tokenizer.json (tokenisation only). The estimate must never be lower.
+QWEN_COUNTS = [
+    ("\n".join(str(i) for i in range(1, 100001))[:3000], 3000),  # seq: every digit is a token
+    ("\n".join(f"{i * 7919 % 100000:05d},{i * 104729 % 1000:03d}.{i % 97:02d}" for i in range(300))[:3000], 3000),
+    (("-rw-r--r-- 1 dell 197121  48213 Sep 26 12:07 file_1.py\n" * 60)[:3000], 2074),
+]
+
+
+@pytest.mark.parametrize("text, real", QWEN_COUNTS)
+def test_estimate_is_pessimistic_for_numbers(text, real):
+    # Characters/3 put these at a third of their real size, so three CSV reads
+    # silently overflowed an 8k Ollama context.
+    assert text_tokens(text) >= real
+
+
+def test_estimate_is_pessimistic_for_random_strings():
+    import base64
+    import os
+    text = base64.b64encode(os.urandom(2250)).decode()  # Qwen: about 2,230 tokens for these 3,000 characters
+    assert text_tokens(text) >= 2230
 
 
 def test_estimate_is_pessimistic_for_non_latin_text_too():

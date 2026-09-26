@@ -254,6 +254,39 @@ def _repo_is_workspace(workspace: Path) -> bool:
     return not any((parent / ".git").exists() for parent in workspace.parents)
 
 
+def repo_is_inert(workspace: Path) -> bool:
+    """True if a read-only git command here can run nothing but git.
+
+    A plain config is not enough on its own: `git status` rewrites the index and
+    so fires .git/hooks/post-index-change, and it recurses into submodules,
+    whose own configs (filters, fsmonitor) are not the one checked here.
+    """
+    if not repo_config_is_plain(workspace):
+        return False
+    git = workspace / ".git"
+    hooks = git / "hooks"
+    if hooks.is_dir() and any(not p.name.endswith(".sample") for p in hooks.iterdir()):
+        return False
+    if (git / "modules").exists() or (workspace / ".gitmodules").exists():
+        return False
+    return not _has_nested_repo(workspace)
+
+
+def _has_nested_repo(workspace: Path) -> bool:
+    """A repository inside the workspace (a gitlink with no .gitmodules): git
+    status recurses into it and runs whatever its own config says."""
+    seen = 0
+    for root, dirs, files in os.walk(workspace):
+        if Path(root) == workspace:
+            dirs[:] = [d for d in dirs if d not in (".git", ".harness")]
+        elif ".git" in dirs or ".git" in files:
+            return True
+        seen += len(dirs) + len(files)
+        if seen > _SCAN_LIMIT:
+            return True  # too big to be sure
+    return False
+
+
 def repo_config_is_plain(workspace: Path) -> bool:
     """True only for a real `.git` folder in the workspace whose config holds
     nothing but the keys a plain clone writes.
@@ -298,7 +331,7 @@ def _git_ok(args: list[str], workspace: Path | None) -> bool:
         return False  # pathspec magic (:/) and object paths (HEAD:../x) reach past the workspace
     if any(_flag_matches(a, UNSAFE_FLAGS["git"]) for a in rest):
         return False
-    return workspace is None or (_repo_is_workspace(workspace) and repo_config_is_plain(workspace))
+    return workspace is None or (_repo_is_workspace(workspace) and repo_is_inert(workspace))
 
 
 def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = False) -> str:

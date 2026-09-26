@@ -65,11 +65,11 @@ def run_subagent(prompt: str, *, llm: LLM, toolbox: Toolbox, max_steps: int, con
                 return ("(the subagent could not continue: its context is full even after trimming; "
                         "give it a shorter, more specific prompt)")
             reply = llm.chat(final, None)
-            return _finish(reply.content, on_event)
+            return _finish(reply.content, on_event, reply.truncated)
         reply = llm.chat(messages, schemas)
         messages.append(reply.to_message())
         if not reply.tool_calls:
-            return _finish(reply.content, on_event)
+            return _finish(reply.content, on_event, reply.truncated)
         for c in reply.tool_calls:
             on_event("subagent_tool_call", c)
             result = (box.call(c.name, c.arguments) if c.name in SUBAGENT_TOOLS
@@ -79,7 +79,9 @@ def run_subagent(prompt: str, *, llm: LLM, toolbox: Toolbox, max_steps: int, con
     return f"(the subagent stopped after {max_steps} steps without a final answer)"
 
 
-def _finish(content: str, on_event) -> str:
+def _finish(content: str, on_event, truncated: bool = False) -> str:
     answer = content.strip() or "(the subagent returned no text)"
+    if truncated:  # otherwise a cut-off answer reaches the main agent looking complete
+        answer += "\n[the subagent's answer was cut off at the model's output limit]"
     on_event("subagent_end", answer)
     return answer

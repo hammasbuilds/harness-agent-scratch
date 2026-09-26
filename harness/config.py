@@ -82,6 +82,9 @@ class Config:
     keep_alive: str = "30m"  # keep the model loaded so its prompt cache survives between turns
     request_timeout: float = 900.0  # CPU inference is slow; one call can take minutes
     retries: int = 2  # extra attempts after a rate limit, 5xx or dropped connection
+    # Longest reply the model may write. On a CPU a rambling model would
+    # otherwise generate until the request timeout, minutes of wasted work.
+    max_output_tokens: int = 2048
     context_limit: int = 8192  # tokens the transcript may grow to before compaction
     compact_at: float = 0.85
     compact_to: float = 0.35
@@ -97,7 +100,7 @@ class Config:
         if not 0 < self.compact_to < self.compact_at <= 1:
             problems.append(f"need 0 < compact_to ({self.compact_to}) < compact_at ({self.compact_at}) <= 1")
         for name, low in (("num_ctx", 512), ("context_limit", 512), ("output_cap", 200), ("max_steps", 1),
-                          ("subagent_max_steps", 1), ("num_thread", 1), ("retries", 0)):
+                          ("subagent_max_steps", 1), ("num_thread", 1), ("retries", 0), ("max_output_tokens", 64)):
             if getattr(self, name) < low:
                 problems.append(f"{name} must be at least {low}, got {getattr(self, name)}")
         if not self.request_timeout > 0:
@@ -107,6 +110,9 @@ class Config:
             problems.append(f"temperature must be between 0 and 2, got {self.temperature}")
         if not (0 < self.compact_at <= 1 and 0 < self.compact_to < 1):
             problems.append("compact_at and compact_to must be numbers between 0 and 1")
+        if self.max_output_tokens * 2 > self.context_limit:
+            problems.append(f"max_output_tokens ({self.max_output_tokens}) must be at most half of "
+                            f"context_limit ({self.context_limit}); the prompt needs the rest")
         if self.backend == "ollama" and self.context_limit > self.num_ctx:
             # Ollama silently drops the start of a prompt longer than num_ctx, so
             # compaction must trigger below it.
@@ -147,6 +153,7 @@ class Config:
             keep_alive=get("KEEP_ALIVE", "30m"),
             request_timeout=number("REQUEST_TIMEOUT", 900.0, float),
             retries=number("RETRIES", 2, int),
+            max_output_tokens=number("MAX_OUTPUT_TOKENS", 2048, int),
             # With Ollama the real ceiling is num_ctx; past it Ollama drops the
             # start of the prompt without telling anyone.
             context_limit=number("CONTEXT_LIMIT", num_ctx if backend == "ollama" else 64000, int),

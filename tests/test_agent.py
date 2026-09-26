@@ -217,11 +217,11 @@ def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_ag
     """The reviewer's case: 8 reads of ~2,400 characters in one reply. There is
     no older turn to compact, so the current turn's outputs must shrink."""
     for i in range(8):
-        (workspace / f"f{i}.txt").write_text(f"{i}" * 2400)
+        (workspace / f"f{i}.txt").write_text(chr(97 + i) * 2400)
     llm = ScriptedLLM([Reply("", [call("read_file", path=f"f{i}.txt") for i in range(8)]), Reply("done")])
     events = []
     agent = make_agent(llm, on_event=lambda k, d: events.append(k))
-    cfg.context_limit = agent.overhead_tokens() + 3000
+    cfg.context_limit = agent.overhead_tokens() + 4000
     cfg.output_cap = 3000
     agent.send("read them all")
     second_request, tools = llm.requests[1]
@@ -229,7 +229,7 @@ def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_ag
     assert "squeezed" in events  # and no ContextOverflow: the request fit after squeezing
     outputs = [m["content"] for m in agent.messages if m["role"] == "tool"]
     assert outputs[0].endswith("removed to fit the context]")  # oldest cut first
-    assert outputs[-1] == "7" * 2400  # the latest kept whole while it fits
+    assert outputs[-1] == "h" * 2400  # the latest kept whole while it fits
 
 
 def test_big_call_arguments_are_trimmed_once_their_call_has_run(cfg, make_agent, workspace):
@@ -325,6 +325,23 @@ def test_git_is_asked_once_per_step(make_agent, monkeypatch):
     llm = ScriptedLLM([Reply("", [call("bash", command="pwd")]), Reply("", [call("bash", command="ls")]), Reply("ok")])
     make_agent(llm).send("go")
     assert len(calls) == 3  # one per model call, however many token estimates each step makes
+
+
+def test_the_prompt_leaves_room_for_the_reply(cfg, make_agent):
+    # Ollama's num_ctx holds the reply too; a prompt that fills it makes Ollama
+    # shift the context mid-reply and drop the start of the prompt.
+    from harness.llm import ContextOverflow
+    agent = make_agent(ScriptedLLM([Reply("never")]))
+    cfg.max_output_tokens = 1000
+    cfg.context_limit = agent.overhead_tokens() + 1500
+    assert agent.prompt_room() == cfg.context_limit - 1000
+    with pytest.raises(ContextOverflow, match="beside a 1000-token reply"):
+        agent.send("word " * 800)  # fits the context, not the context minus the reply
+
+
+def test_a_cut_off_subagent_answer_says_so():
+    from harness.subagent import _finish
+    assert _finish("half an ans", lambda k, d: None, truncated=True).endswith("cut off at the model's output limit]")
 
 
 def test_a_subagent_prompt_too_big_to_answer_is_not_sent(cfg, make_agent):

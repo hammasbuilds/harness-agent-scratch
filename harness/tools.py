@@ -436,8 +436,11 @@ class Toolbox:
     # ---- paths ----------------------------------------------------------
 
     def _resolve(self, path: str) -> Path:
-        p = Path(path).expanduser()
-        return (p if p.is_absolute() else self.workspace / p).resolve()
+        try:
+            p = Path(path).expanduser()
+            return (p if p.is_absolute() else self.workspace / p).resolve()
+        except RuntimeError as e:  # a symlink loop (`ln -s loop loop`) on Python 3.10-3.12
+            raise ToolError(f"{path}: {e}") from None
 
     def _inside(self, p: Path) -> bool:
         return p == self.workspace or p.is_relative_to(self.workspace)
