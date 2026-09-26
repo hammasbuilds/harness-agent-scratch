@@ -201,6 +201,13 @@ def test_ripgrep_options_that_run_programs_ask(box_ws, command):
     assert classify(command, box_ws) == ASK
 
 
+def test_ripgrep_is_off_the_list_entirely(box_ws):
+    # It has options that run programs (--pre, and --hostname-bin since 14), so by
+    # the module's rule it asks, however plain the call; grep covers the same reads.
+    assert classify("rg TODO src", box_ws) == ASK
+    assert classify("grep -rn TODO src", box_ws) == ALLOW
+
+
 @pytest.mark.parametrize("folder", ["build", "dist", "node_modules/pkg", ".venv", "__pycache__"])
 def test_secrets_in_build_and_dependency_folders_still_count(box_ws, folder):
     (box_ws / folder).mkdir(parents=True)
@@ -339,7 +346,7 @@ def test_after_all_that_plain_reads_still_run(box_ws, command):
 
 
 def test_recursive_readers_ask_only_when_the_workspace_holds_secrets(box_ws):
-    for command in ["grep -rn API_KEY .", "grep -R x src", "rg KEY", "diff -r . src", "grep --recursive x ."]:
+    for command in ["grep -rn API_KEY .", "grep -R x src", "diff -r . src", "grep --recursive x ."]:
         assert classify(command, box_ws) == ALLOW, command
     (box_ws / "src" / ".env").write_text("HARNESS_API_KEY=sk")
     for command in ["grep -rn API_KEY .", "grep -R x src", "rg KEY", "diff -r . src", "grep --recursive x .",

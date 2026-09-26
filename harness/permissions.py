@@ -5,17 +5,21 @@ The rule for running without asking is an allowlist, not a list of dangers:
 - every command is a bare program name (no path: `./ls` could be a script the
   model just wrote) from READ_ONLY, a set chosen because none of those programs
   has an option that writes a file or runs another program; programs that do
-  (`sort -o`, `file -C`, `tree -o`, `date -s`) are simply not on it, because
-  bundled short options (`-uo`) and abbreviated long ones (`--outp`) make a
-  blocklist of their flags unreliable;
+  (`sort -o`, `file -C`, `tree -o`, `date -s`, `rg --pre`/`--hostname-bin`) are
+  simply not on it, because bundled short options (`-uo`), abbreviated long ones
+  (`--outp`) and options added in new versions make a blocklist of their flags
+  unreliable. The one exception is find, whose actions (`-exec`, `-delete`, ...)
+  are whole words that can be neither bundled nor abbreviated;
 - git only as `git <read-only subcommand> ...`, with no global options, no
-  `:` pathspecs or object paths, and only when the repository is the workspace;
+  `:` pathspecs or object paths, and only when the repository is the workspace
+  and its config holds nothing but the keys a plain clone writes;
 - no expansion the shell would perform on text this parser cannot see (`$`,
   backticks, process substitution, braces);
 - every argument that could be a path (including one glued to a flag, or after
   a `:`) resolves inside the workspace, following globs and symlinks, and is
-  not a credentials file; recursive readers (`grep -r`, `rg`, `diff -r`) ask
-  whenever the workspace holds one;
+  not a credentials file; recursive readers (`grep -r`, `diff -r`) ask
+  whenever the workspace holds one, and they and link-following walkers ask
+  whenever a symlink or junction leads out of it;
 - output redirection only to /dev/null, and no operator the parser does not
   model.
 
@@ -36,18 +40,17 @@ from pathlib import Path
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 
 READ_ONLY = {
-    "ls", "dir", "pwd", "echo", "printf", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep", "rg",
+    "ls", "dir", "pwd", "echo", "printf", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep",
     "find", "which", "whoami", "stat", "du", "df", "basename", "dirname", "realpath", "true", "false",
     "nl", "cut", "diff", "uniq",
 }
 GIT_READ_ONLY = {"status", "log", "diff", "show", "rev-parse", "ls-files", "blame"}
-# The few options of READ_ONLY programs (and git) that write or execute. None of
-# these programs bundles them or is sort/file/tree/date; long options are also
-# matched by prefix, since git accepts `--outp` for `--output`.
+# Options that write, execute or read indirectly, for the programs where such
+# options are whole words (find) or are checked beside other rules (git, whose
+# long options are also matched by prefix, since it accepts `--outp` for
+# `--output`).
 UNSAFE_FLAGS = {
     "find": {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"},
-    # ripgrep 14: --hostname-bin runs a program to name the host in hyperlinks.
-    "rg": {"--pre", "--pre-glob", "--search-zip", "-z", "--hostname-bin", "--hyperlink-format"},
     "git": {"--output", "--ext-diff", "--textconv", "--exec", "--upload-pack", "--open-files-in-pager", "-O"},
     # Read the names of the files to read from another file, which the model can
     # write without asking and fill with paths outside the workspace.
@@ -212,8 +215,6 @@ def _recursive(name: str, args: list[str]) -> bool:
     any abbreviation getopt accepts (--rec, --dir). `-d` and --directories are
     treated as recursion whatever their value, which only ever over-asks.
     """
-    if name == "rg":
-        return True
     letters = RECURSIVE.get(name)
     if not letters:
         return False

@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/models-local%20via%20ollama%20(CPU)-success" alt="models">
   <img src="https://img.shields.io/badge/API%20keys-none%20required-success" alt="api keys">
   <img src="https://img.shields.io/badge/dependencies-0-success" alt="dependencies">
-  <img src="https://img.shields.io/badge/tests-464-brightgreen" alt="tests">
+  <img src="https://img.shields.io/badge/tests-465-brightgreen" alt="tests">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license"></a>
 </p>
 
@@ -66,7 +66,7 @@ asserts that each request starts with the previous one.
 | 04 | [Skills](harness/skills.py) | 9 | Finds `SKILL.md` under `~/.agents/skills` and `<workspace>/.agents/skills`; only name + description enter the system prompt, the body loads on demand, and files in a skill's folder are readable without a prompt. |
 | 05 | [Late injection](harness/context.py) | 14 | Date, git branch/commit, todo list and stale-file warnings, added after the transcript in a `<system-reminder>`. |
 | 06 | [Todos](harness/todos.py) | ↑ | The model rewrites the whole list each time; one item `in_progress` at a time. |
-| 07 | [Permissions](harness/permissions.py) | 196 | An allowlist, not a list of dangers. Runs without asking only: bare names of programs that have no writing or executing option at all (`sort`, `file`, `tree`, `date` are left out; `./ls` asks); `git` only as `git <read-only subcommand>` with no global options or `:` pathspecs, in a repository that is the workspace and whose config holds only the keys a plain clone writes; no `$`, braces or unknown operators; every path-like argument (glued to a flag, after a `:`, through globs and symlinks) inside the workspace and not a credentials file; recursive readers (every grep spelling: `-r`, `-d recurse`, `--rec`, …) only when the workspace holds no credentials, and link-following walkers (`find -L`, `ls -L`, `du -L`) only when no symlink or junction leads out of it. |
+| 07 | [Permissions](harness/permissions.py) | 197 | An allowlist, not a list of dangers. Runs without asking only: bare names of programs that have no writing or executing option at all (`sort`, `file`, `tree`, `date`, `rg` are left out; `./ls` asks); `git` only as `git <read-only subcommand>` with no global options or `:` pathspecs, in a repository that is the workspace and whose config holds only the keys a plain clone writes; no `$`, braces or unknown operators; every path-like argument (glued to a flag, after a `:`, through globs and symlinks) inside the workspace and not a credentials file; recursive readers (every grep spelling: `-r`, `-d recurse`, `--rec`, …) only when the workspace holds no credentials, and link-following walkers (`find -L`, `ls -L`, `du -L`) only when no symlink or junction leads out of it. |
 | 08 | [Sandbox](harness/sandbox.py) | 12 | Linux: bubblewrap with a read-only root, private `/tmp` and `/run`, no network, own PID namespace. macOS: Seatbelt, writes only in the workspace and system temp folders, no network. Windows: none, and the CLI says so. |
 | 09 | [Output capping](harness/tools.py) | ↑ | Results over 3,000 characters are cut; the full text goes to `.harness/spill/` for `head`/`grep`, and is deleted when the turn ends. A command's output is held to its first and last 1M characters, and nothing it starts outlives it: background processes are stopped (a Job Object on Windows, the process group elsewhere). Commands run without credential variables in their environment, with Python children set to write UTF-8. |
 | 10 | [Compaction](harness/compaction.py) | 13 | Counts everything sent (system prompt, ~900 tokens of tool schemas, reminder, transcript). At 85% of the limit, finished turns become a capped, model-written handoff note; if the current turn alone is too big, its tool outputs are cut, oldest first. |
@@ -184,7 +184,7 @@ harness/
   config.py       HARNESS_* settings and .env
   cli.py          terminal front end
 demo.py           one task in a throwaway folder (--scripted for no model)
-tests/            464 tests; scripted model, real tools
+tests/            465 tests; scripted model, real tools
 ```
 
 ## Requirements
@@ -202,7 +202,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-464 tests, one to two minutes on a laptop CPU (it varies with load; one test, following a symlink, is skipped on Windows accounts that cannot create symlinks; junctions, which need no rights, are tested instead). No network, no model, no GPU: a `ScriptedLLM` replays pre-written
+465 tests, one to two minutes on a laptop CPU (it varies with load; one test, following a symlink, is skipped on Windows accounts that cannot create symlinks; junctions, which need no rights, are tested instead). No network, no model, no GPU: a `ScriptedLLM` replays pre-written
 replies while the tools really run: files are written, `bash` really executes, subagents really run
 their own loop. HTTP handling is tested against a local `http.server` stub. The suite was also run
 in a fresh virtualenv holding only pytest, with `HOME` pointed at an empty folder, so it does not
@@ -272,8 +272,9 @@ finding with a probe; each one below was reproduced, fixed and pinned by a test.
 - **`(sleep 30; ...) &` cost two 5-second waits and kept running.** `taskkill /T` cannot find the
   children of a shell that has already exited; a Job Object with kill-on-close can.
 - **The sixth reviewer made `rg` run a program**: ripgrep 14's `--hostname-bin` executes whatever it
-  names to fill in hyperlinks. A "programs with no executing option" list goes stale as programs
-  gain options; this one is now blocked, and the list is only as current as its last audit.
+  names to fill in hyperlinks. Blocking that flag would repeat the mistake of round three, a list of
+  flags that goes stale as programs gain options, so `rg` came off the list; `grep` covers the same
+  reads.
 - **A list of dangerous `.git/config` keys missed three** (`diff.<driver>.command`, `gpg.program`
   with `log.showSignature`, `config.worktree`). As with the command list before it, the fix was
   to invert it: git runs without asking only when the config holds just the keys a clone writes.
