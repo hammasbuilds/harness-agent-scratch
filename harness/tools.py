@@ -55,6 +55,7 @@ _URL_WITH_PASSWORD = re.compile(r"://[^/\s:@]*:[^/\s@]+@")  # user may be empty:
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
 # Encoding labels decode() returns for files with a byte-order mark.
 _BOMS = [(codecs.BOM_UTF8, "utf-8-sig"), (codecs.BOM_UTF16_LE, "utf-16-le+bom"), (codecs.BOM_UTF16_BE, "utf-16-be+bom")]
+_RESERVED_DEVICE = re.compile(r"^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(\..*)?$", re.I)
 # Control and bidirectional-override characters: a command containing "\r" or
 # U+202E can make an approval prompt display something other than what runs.
 _UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f  ‪-‮⁦-⁩]")
@@ -473,6 +474,11 @@ class Toolbox:
                 raise ToolError(f"{self._show(p)}: a name ending in a dot or space is not allowed on Windows")
             if ":" in part:
                 raise ToolError(f"{self._show(p)}: ':' in a name selects an NTFS stream; not allowed")
+            if _RESERVED_DEVICE.match(part):
+                # NUL, COM1, AUX...: devices, not files, even with an extension; files
+                # made by other means under these names are hard to delete and break
+                # checkouts on other Windows machines.
+                raise ToolError(f"{self._show(p)}: {part} is a reserved device name on Windows")
 
     def _check_read(self, p: Path) -> None:
         if self._inside(p):

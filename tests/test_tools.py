@@ -327,7 +327,9 @@ def test_python_children_write_utf8_that_arrives_intact(cfg, allow, workspace):
 
 
 @needs_posix_shell
-def test_colour_codes_are_stripped(box):
+def test_colour_codes_are_stripped(cfg, allow, workspace):
+    # `[` makes the command ask (bracket patterns), so approve it.
+    box = Toolbox(cfg, allow, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
     assert run(box, "bash", command=r"printf '\033[31mred\033[0m plain'") == "red plain\n[exit code 0]"
 
 
@@ -439,6 +441,13 @@ def test_windows_name_aliases_cannot_slip_past_the_guards(box, workspace, deny, 
     assert out.startswith("error:") and "dot or space" in out
     assert not any(workspace.iterdir())
     assert deny.asked == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows device names")
+@pytest.mark.parametrize("path", ["COM1", "AUX", "nul.txt", "NUL", "src/con.py", "lpt3.log"])
+def test_windows_reserved_device_names_are_refused(box, workspace, path):
+    out = run(box, "write_file", path=path, content="x")
+    assert "reserved device name" in out and not any(workspace.iterdir())
 
 
 @pytest.mark.skipif(os.name != "nt", reason="NTFS alternate data streams")

@@ -156,6 +156,11 @@ def unsafe_target(token: str, workspace: Path | None) -> bool:
         return False
     if "{" in token or "}" in token or is_secret_file(token):
         return True
+    # Bracket patterns: bash has negation ([!a]) and classes ([[:alpha:]]) that
+    # Python's glob reads as literal characters, so the expansion below could find
+    # nothing where bash finds a key file. `*` and `?` mean the same in both.
+    if "[" in token:
+        return True
     if workspace is None:
         return False
     parts = re.split(r"[\\/]", token)

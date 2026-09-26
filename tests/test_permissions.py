@@ -348,6 +348,15 @@ def test_the_end_of_options_marker_is_followed(box_ws, command):
     assert classify(command, box_ws) == ASK
 
 
+@pytest.mark.parametrize("command", ["cat [!a]d_rsa", "cat [[:alpha:]]d_rsa", "cat server.[p]em", "cat [^x]*",
+                                     "grep -n '[a-z]' a.txt"])
+def test_bracket_patterns_always_ask(box_ws, command):
+    # Python's glob reads bash's [!..] and [[:class:]] as literal text, found no
+    # match, and let bash print a key file the check never saw.
+    (box_ws / "id_rsa").write_text("KEY")
+    assert classify(command, box_ws) == ASK
+
+
 def test_a_glob_that_expands_to_an_option_shaped_name_asks(box_ws):
     (box_ws / "-delete").write_text("")  # write_file can make this without asking
     assert classify("find *", box_ws) == ASK

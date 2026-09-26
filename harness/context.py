@@ -31,6 +31,12 @@ def _git_dir(workspace: Path) -> Path | None:
     could then run a program (gpg.program with log.showSignature) every time the
     harness asks for the branch. So only a real `.git` folder counts, and a
     workspace `.git` only with a plain config.
+
+    A parent folder's `.git` is used as it is: the model cannot write outside
+    the workspace, and only symbolic-ref, rev-parse and `log --format` run, none
+    of which starts a program from config. A `.git` *file* (a worktree or a
+    submodule checkout) is not followed, so there the reminder shows the
+    enclosing repository's branch, or none.
     """
     own = workspace / ".git"
     if own.exists():
