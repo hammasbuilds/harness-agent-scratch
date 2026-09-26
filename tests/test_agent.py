@@ -146,7 +146,7 @@ def test_compaction_kicks_in_and_moves_history_into_the_system_prompt(cfg, make_
     agent.send("read big.txt")
     assert "compacted" not in events
     # The new question alone overflows, so the first turn has to go.
-    agent.send("now summarise " + "q" * 3000)
+    agent.send("now summarise " + "q" * 1200)
     assert "compacted" in events
     assert agent.summary == "HANDOFF: read big.txt, it is all z"
     assert "HANDOFF" in agent.system_message()["content"]
@@ -230,6 +230,27 @@ def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_ag
     outputs = [m["content"] for m in agent.messages if m["role"] == "tool"]
     assert outputs[0].endswith("removed to fit the context]")  # oldest cut first
     assert outputs[-1] == "7" * 2400  # the latest kept whole while it fits
+
+
+def test_big_call_arguments_are_trimmed_once_their_call_has_run(cfg, make_agent, workspace):
+    big = "x = 1\n" * 5000  # a 30 KB write_file, as in the third review
+    llm = ScriptedLLM([Reply("", [call("write_file", path="gen.py", content=big)]), Reply("done")])
+    agent = make_agent(llm)
+    cfg.context_limit = agent.overhead_tokens() + 3000
+    assert agent.send("generate it") == "done"
+    assert (workspace / "gen.py").read_text() == big  # the file keeps it all
+    sent_args = llm.requests[1][0][-3]["tool_calls"][0]["function"]["arguments"]
+    assert "removed to fit the context" in sent_args and len(sent_args) < 200
+
+
+def test_a_request_that_cannot_fit_is_refused_not_sent(cfg, make_agent):
+    from harness.llm import ContextOverflow
+    llm = ScriptedLLM([Reply("never")])
+    agent = make_agent(llm)
+    cfg.context_limit = agent.overhead_tokens() + 500
+    with pytest.raises(ContextOverflow, match="does not fit"):
+        agent.send("q" * 20_000)  # the user's own message is too big to trim
+    assert llm.requests == []  # Ollama never got a prompt it would have cut silently
 
 
 def test_a_deleted_file_is_reported_once(make_agent, workspace):

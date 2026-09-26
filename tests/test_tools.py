@@ -1,3 +1,4 @@
+import codecs
 import json
 import os
 import time
@@ -262,12 +263,19 @@ def test_secrets_are_not_in_the_commands_environment(cfg, allow, workspace, monk
 
 @pytest.mark.parametrize("name, secret", [
     ("OPENROUTER_API_KEY", True), ("AWS_SECRET_ACCESS_KEY", True), ("GH_TOKEN", True), ("KEY", True),
-    ("PGPASSWORD", False), ("PATH", False), ("KEYBOARD_LAYOUT", False), ("SSH_AUTH_SOCK", False),
+    ("PGPASSWORD", True), ("GITHUB_PAT", True), ("MYSQL_PWD", True), ("PWD", False), ("PATH", False), ("KEYBOARD_LAYOUT", False), ("SSH_AUTH_SOCK", False),
     ("MONKEY_BUSINESS", False),
 ])
 def test_secret_name_detection(name, secret):
     from harness.tools import scrubbed_env
     assert (name not in scrubbed_env({name: "v"})) is secret
+
+
+def test_urls_carrying_a_password_are_scrubbed_whatever_their_name():
+    from harness.tools import scrubbed_env
+    env = scrubbed_env({"DATABASE_URL": "postgres://u:p@h/db", "REDIS": "redis://:pw@h:6379",
+                        "MIRROR": "https://user:tok@example.com/", "HOMEPAGE": "https://example.com/"})
+    assert env == {"HOMEPAGE": "https://example.com/"}
 
 
 @needs_posix_shell
@@ -359,7 +367,52 @@ def test_write_file_does_not_double_carriage_returns(box, workspace):
     assert f.read_bytes() == b"a\r\nb\r\n"
 
 
+def test_utf16_big_endian_round_trips_byte_for_byte(box, workspace):
+    f = workspace / "be.txt"
+    original = codecs.BOM_UTF16_BE + "hello\nworld\n".encode("utf-16-be")
+    f.write_bytes(original)
+    run(box, "read_file", path="be.txt")
+    run(box, "str_replace", path="be.txt", old_string="world", new_string="there")
+    assert f.read_bytes() == codecs.BOM_UTF16_BE + "hello\nthere\n".encode("utf-16-be")  # was rewritten as LE
+
+
 # ---- guarded files ------------------------------------------------------------
+
+def test_git_folders_are_blocked_at_any_depth(box, workspace):
+    assert "inside .git/" in run(box, "write_file", path="vendor/lib/.git/hooks/pre-commit", content="x")
+    assert "inside .git/" in run(box, "write_file", path=".git", content="gitdir: /elsewhere")
+
+
+def test_approval_prompts_show_control_characters(cfg, workspace):
+    asked = []
+    box = Toolbox(cfg, lambda q: asked.append(q) or False, skills={}, todos=TodoList(),
+                  sandbox=Sandbox(workspace, "none"))
+    run(box, "bash", command="rm -rf src;\rAllow? run: ls -la")
+    rlo = chr(0x202E)  # right-to-left override: reverses how the rest of the line displays
+    run(box, "bash", command=f"rm x {rlo} txt.exe")
+    assert asked[0] == "run: rm -rf src;\\rAllow? run: ls -la"  # \r can no longer hide the rm
+    assert rlo not in asked[1] and "\\u202e" in asked[1]
+
+
+def test_spill_is_not_written_through_a_redirected_harness_folder(cfg, deny, workspace, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("precious")
+    try:
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(str(outside), str(workspace / ".harness"))
+        else:
+            (workspace / ".harness").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("cannot create a junction or symlink here")
+    cfg.output_cap = 200
+    box = Toolbox(cfg, deny, skills={}, todos=TodoList(), sandbox=Sandbox(workspace, "none"))
+    (workspace / "big.txt").write_text("x" * 1000)
+    out = run(box, "read_file", path="big.txt")
+    assert "the rest was not kept" in out
+    box.cleanup_spill()
+    assert sorted(p.name for p in outside.iterdir()) == ["keep.txt"]  # nothing written or deleted there
 
 @pytest.mark.parametrize("path", [".env", "config/.env.local", ".agents/skills/x/SKILL.md", ".harness/notes.txt",
                                   "certs/server.pem"])

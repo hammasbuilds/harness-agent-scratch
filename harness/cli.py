@@ -93,6 +93,11 @@ def build_config(args: argparse.Namespace, env: dict, warn=lambda msg: print(msg
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    # Redirected output on Windows is cp1252: one "✓" in a tool result would
+    # raise UnicodeEncodeError and end the session.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     try:
         cfg = build_config(args, dict(os.environ))
         printer = Printer()

@@ -41,9 +41,18 @@ BLOCKED_DIRS = (".git",)  # hooks and config there run code on the next git comm
 GUARDED_DIRS = (".agents", ".harness")
 
 # Variables whose values are credentials. The model's commands run without them.
-_SECRET_NAME = re.compile(r"(^|_)(API_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)($|_)", re.I)
+# Distinctive words match anywhere (PGPASSWORD); short ones only as a whole
+# part of the name (GITHUB_PAT, MYSQL_PWD, but not PWD, the current folder).
+_SECRET_NAME = re.compile(
+    r"PASSWORD|PASSWD|SECRET|TOKEN|CREDENTIAL|API_?KEY|PRIVATE_?KEY|WEBHOOK|"
+    r"(^|_)(KEY|PAT|PASS|DSN)($|_)|_PWD$|^DATABASE_URL$", re.I)
+_URL_WITH_PASSWORD = re.compile(r"://[^/\s:@]*:[^/\s@]+@")  # user may be empty: redis://:pw@host
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
-_BOMS = [(codecs.BOM_UTF8, "utf-8-sig"), (codecs.BOM_UTF16_LE, "utf-16"), (codecs.BOM_UTF16_BE, "utf-16")]
+# Encoding labels decode() returns for files with a byte-order mark.
+_BOMS = [(codecs.BOM_UTF8, "utf-8-sig"), (codecs.BOM_UTF16_LE, "utf-16-le+bom"), (codecs.BOM_UTF16_BE, "utf-16-be+bom")]
+# Control and bidirectional-override characters: a command containing "\r" or
+# U+202E can make an approval prompt display something other than what runs.
+_UNPRINTABLE = re.compile(r"[\x00-\x1f\x7f-\x9f  ‪-‮⁦-⁩]")
 
 
 class ToolError(Exception):
@@ -83,7 +92,21 @@ def _json_type_ok(value, expected: str | None) -> bool:
 def scrubbed_env(env: Mapping[str, str]) -> dict[str, str]:
     """The environment minus credentials. `echo $GITHUB_TOKEN` would otherwise
     print a secret into a transcript that is sent to the model provider."""
-    return {k: v for k, v in env.items() if not _SECRET_NAME.search(k)}
+    return {k: v for k, v in env.items() if not _SECRET_NAME.search(k) and not _URL_WITH_PASSWORD.search(v)}
+
+
+def printable(text: str) -> str:
+    """Show control characters as escapes, so a prompt shows what will run."""
+    return _UNPRINTABLE.sub(lambda m: m.group().encode("unicode_escape").decode("ascii"), text)
+
+
+def encode(text: str, encoding: str) -> bytes:
+    """The inverse of decode(), byte-order mark included."""
+    if encoding.endswith("+bom"):
+        base = encoding.removesuffix("+bom")
+        bom = codecs.BOM_UTF16_LE if base == "utf-16-le" else codecs.BOM_UTF16_BE
+        return bom + text.encode(base)
+    return text.encode(encoding)
 
 
 def strip_ansi(text: str) -> str:
@@ -101,7 +124,7 @@ def decode(raw: bytes) -> tuple[str, str]:
     """
     for bom, encoding in _BOMS:
         if raw.startswith(bom):
-            return raw.decode(encoding), encoding
+            return raw[len(bom):].decode(encoding.removesuffix("+bom")), encoding
     try:
         return raw.decode("utf-8"), "utf-8"
     except UnicodeDecodeError:
@@ -181,7 +204,7 @@ class Toolbox:
                  read_only: bool = False, spill_prefix: str = "output"):
         self.cfg = cfg
         self.workspace = cfg.workspace.resolve()
-        self.approve = approve
+        self.approve = lambda question: approve(printable(question))
         self.skills = skills
         self.todos = todos
         self.sandbox = sandbox
@@ -297,6 +320,8 @@ class Toolbox:
         limit = self.cfg.output_cap
         if len(text) <= limit:
             return text
+        if not self._spill_dir_is_safe():
+            return f"{text[:limit]}\n\n[truncated: showing {limit} of {len(text)} characters; the rest was not kept]"
         self.spill_dir.mkdir(parents=True, exist_ok=True)
         path = self.spill_dir / f"{self.spill_prefix}-{next(self._spill_ids)}.txt"
         path.write_text(text, encoding="utf-8", newline="")
@@ -304,8 +329,17 @@ class Toolbox:
         return (f"{text[:limit]}\n\n[truncated: showing {limit} of {len(text)} characters. "
                 f"Full output: {rel}. Page it with head, tail, sed -n or grep. Deleted when this turn ends.]")
 
+    def _spill_dir_is_safe(self) -> bool:
+        """.harness could be a symlink or junction pointing elsewhere; then the
+        spill would be written, and later deleted, outside the workspace."""
+        try:
+            return self.spill_dir.resolve() == self.spill_dir and self.spill_dir.parent.resolve() == self.spill_dir.parent
+        except OSError:
+            return False
+
     def cleanup_spill(self) -> None:
-        shutil.rmtree(self.spill_dir, ignore_errors=True)
+        if self._spill_dir_is_safe():
+            shutil.rmtree(self.spill_dir, ignore_errors=True)
         self._spill_ids = itertools.count(1)
 
     # ---- paths ----------------------------------------------------------
@@ -337,8 +371,9 @@ class Toolbox:
             raise ToolError(f"{p} is outside the workspace ({self.workspace}); writes are confined to it")
         rel = p.relative_to(self.workspace).parts
         top = rel[0].lower() if rel else ""
-        if top in BLOCKED_DIRS:
-            raise ToolError(f"{self._show(p)} is inside {rel[0]}/, which the harness does not let tools change")
+        blocked = next((part for part in rel if part.lower() in BLOCKED_DIRS), None)
+        if blocked:  # at any depth: sub/.git/hooks runs code as surely as .git/hooks
+            raise ToolError(f"{self._show(p)} is inside {blocked}/, which the harness does not let tools change")
         if (top in GUARDED_DIRS or permissions.is_secret_file(p.name)) and not self._ask(
                 f"change {self._show(p)} (it configures the harness or holds credentials)"):
             raise ToolError(f"changing {self._show(p)} was not approved")
@@ -369,7 +404,7 @@ class Toolbox:
             if style == "crlf":
                 text = text.replace("\n", "\r\n")
         try:
-            data = text.encode(encoding)
+            data = encode(text, encoding)
         except UnicodeEncodeError:
             raise ToolError(f"{self._show(p)} is stored as {encoding}, which cannot hold some of the new "
                             "characters; keep to characters that encoding supports") from None

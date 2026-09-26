@@ -19,11 +19,13 @@ from .todos import TodoList
 def git_summary(workspace: Path) -> str | None:
     def git(*args: str) -> str | None:
         try:
-            out = subprocess.run(["git", *args], cwd=workspace, capture_output=True, text=True,
-                                 timeout=5, stdin=subprocess.DEVNULL)
+            # git prints UTF-8; the locale codec (cp1252 here) failed on an emoji
+            # in a commit subject and took the whole session down with it.
+            out = subprocess.run(["git", *args], cwd=workspace, capture_output=True, encoding="utf-8",
+                                 errors="replace", timeout=5, stdin=subprocess.DEVNULL)
         except (OSError, subprocess.TimeoutExpired):
             return None
-        return out.stdout.strip() if out.returncode == 0 else None
+        return (out.stdout or "").strip() if out.returncode == 0 else None
 
     # symbolic-ref works in a repo with no commits yet; rev-parse covers a detached HEAD.
     branch = git("symbolic-ref", "--short", "HEAD")

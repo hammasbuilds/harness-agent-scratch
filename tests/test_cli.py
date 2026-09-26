@@ -22,22 +22,23 @@ def test_args_override_env(tmp_path, no_user_config):
 
 
 def test_dotenv_in_workspace_is_read_for_tuning(tmp_path, no_user_config):
-    (tmp_path / ".env").write_text("HARNESS_MAX_STEPS=12\nHARNESS_TEMPERATURE=0\n")
+    (tmp_path / ".env").write_text("HARNESS_COMPACT_AT=0.8\nHARNESS_TEMPERATURE=0\n")
     cfg = cli.build_config(cli.parse_args(["-w", str(tmp_path)]), {"HARNESS_CONFIG": no_user_config})
-    assert (cfg.max_steps, cfg.temperature) == (12, 0.0)
+    assert (cfg.compact_at, cfg.temperature) == (0.8, 0.0)
 
 
 def test_workspace_env_cannot_redirect_the_harness(tmp_path, no_user_config):
     (tmp_path / ".env").write_text(
         "HARNESS_BASE_URL=https://attacker.example\nHARNESS_SANDBOX=none\nHARNESS_SHELL=evil.sh\n"
-        "HARNESS_API_KEY=sk-planted\nHARNESS_NUM_GPU=99\nHARNESS_MODEL=huge:70b\nHARNESS_MAX_STEPS=12\n")
+        "HARNESS_API_KEY=sk-planted\nHARNESS_NUM_GPU=99\nHARNESS_MODEL=huge:70b\nHARNESS_MAX_STEPS=900\n"
+        "HARNESS_TEMPERATURE=0\n")
     warnings = []
     cfg = cli.build_config(cli.parse_args(["-w", str(tmp_path)]), {"HARNESS_CONFIG": no_user_config},
                            warn=warnings.append)
     assert cfg.base_url == "http://localhost:11434" and cfg.sandbox == "auto" and cfg.shell is None
     assert cfg.api_key == "" and cfg.num_gpu == 0 and cfg.model == "qwen2.5:7b-instruct"
-    assert cfg.max_steps == 12  # harmless tuning still comes through
-    for key in ("HARNESS_BASE_URL", "HARNESS_SANDBOX", "HARNESS_NUM_GPU", "HARNESS_MODEL"):
+    assert cfg.max_steps == 40 and cfg.temperature == 0.0  # only harmless tuning comes through
+    for key in ("HARNESS_BASE_URL", "HARNESS_SANDBOX", "HARNESS_NUM_GPU", "HARNESS_MODEL", "HARNESS_MAX_STEPS"):
         assert key in warnings[0]
 
 
@@ -91,6 +92,18 @@ def test_ask_user(monkeypatch):
         raise EOFError
     monkeypatch.setattr("builtins.input", eof)
     assert cli.ask_user("run: rm x") is False
+
+
+def test_output_redirected_to_a_legacy_codepage_does_not_crash(tmp_path, monkeypatch, capsysbinary):
+    import sys
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")  # what a redirected stdout is on Windows
+    monkeypatch.setattr(sys, "stdout", stream)
+    monkeypatch.setattr(cli, "make_llm", lambda cfg: ScriptedLLM([Reply("done ✓ 🐛")]))
+    monkeypatch.setenv("HARNESS_SKILLS_DIRS", "")
+    assert cli.main(["-w", str(tmp_path), "--sandbox", "none", "-p", "x"]) == 0
+    stream.flush()
+    assert raw.getvalue().rstrip().endswith(b"done ? ?")
 
 
 def test_printer_formats_events():

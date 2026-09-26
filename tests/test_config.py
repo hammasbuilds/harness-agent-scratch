@@ -81,11 +81,20 @@ def test_dotenv_values(tmp_path, line, value):
 
 
 def test_project_env_is_an_allowlist(tmp_path):
-    (tmp_path / ".env").write_text("HARNESS_NUM_GPU=99\nHARNESS_MODEL=big\nHARNESS_MAX_STEPS=10\nOTHER=1\n")
+    (tmp_path / ".env").write_text("HARNESS_NUM_GPU=99\nHARNESS_MODEL=big\nHARNESS_TEMPERATURE=0\n"
+                                   "HARNESS_MAX_STEPS=900\nOTHER=1\n")
     env = {}
     ignored = load_dotenv(tmp_path / ".env", env, only=PROJECT_SETTINGS)
-    assert env == {"HARNESS_MAX_STEPS": "10"}
-    assert ignored == ["HARNESS_NUM_GPU", "HARNESS_MODEL"]  # OTHER is not ours to mention
+    assert env == {"HARNESS_TEMPERATURE": "0"}
+    # step counts could multiply a paid session's cost; OTHER is not ours to mention
+    assert ignored == ["HARNESS_NUM_GPU", "HARNESS_MODEL", "HARNESS_MAX_STEPS"]
+
+
+def test_notepad_bom_does_not_hide_the_first_setting(tmp_path):
+    (tmp_path / ".env").write_bytes(b"\xef\xbb\xbfHARNESS_MODEL=x\n")
+    env = {}
+    load_dotenv(tmp_path / ".env", env)
+    assert env == {"HARNESS_MODEL": "x"}
 
 
 def test_compaction_thresholds_must_be_ordered(tmp_path):

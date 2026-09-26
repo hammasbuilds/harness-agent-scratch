@@ -15,6 +15,7 @@ when a new user turn begins.
 
 from __future__ import annotations
 
+import json
 import platform
 from datetime import date
 from typing import Callable
@@ -22,7 +23,7 @@ from typing import Callable
 from .compaction import compact, estimate_tokens
 from .config import Config
 from .context import build_reminder, git_summary
-from .llm import LLM
+from .llm import LLM, ContextOverflow
 from .sandbox import Sandbox
 from .skills import default_skill_dirs, discover_skills, skills_prompt
 from .subagent import run_subagent
@@ -206,10 +207,28 @@ class Agent:
                 tokens -= before - estimate_tokens([m])  # one message re-measured, not the whole request
                 if tokens <= budget:
                     break
+        if tokens > budget:
+            # Then the arguments of calls that already ran: a 30 KB write_file is
+            # as big as any tool result, and the file on disk still has it.
+            for m in [m for m in self.messages if m["role"] == "assistant" and m.get("tool_calls")]:
+                for tc in m["tool_calls"]:
+                    args = tc["function"]["arguments"]
+                    if len(args) > STRIPPED_KEEP:
+                        before = estimate_tokens([m])
+                        tc["function"]["arguments"] = json.dumps(
+                            {"_note": f"arguments ({len(args)} characters) removed to fit the context"})
+                        tokens -= before - estimate_tokens([m])
+                if tokens <= budget:
+                    break
         tokens = self.context_tokens()
         self.on_event("squeezed", (tokens, int(budget)))
         if tokens > self.cfg.context_limit:
-            self.on_event("overflow", (tokens, self.cfg.context_limit))
+            # Sending it anyway would let Ollama silently drop the start of the
+            # prompt, system prompt included; better to stop and say so.
+            raise ContextOverflow(
+                f"the request (~{tokens} tokens) does not fit the {self.cfg.context_limit}-token context even after "
+                "compacting and trimming; the current message is too large. Start over with /clear, send less at "
+                "once, or raise HARNESS_NUM_CTX.")
 
     def _compact_old_turns(self) -> None:
         limit = self.cfg.context_limit

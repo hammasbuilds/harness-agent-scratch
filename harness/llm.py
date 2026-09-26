@@ -41,6 +41,11 @@ class LLMError(RuntimeError):
 
 
 RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504}
+MAX_RESPONSE_BYTES = 20_000_000
+
+
+class ContextOverflow(LLMError):
+    """The request cannot be made to fit the model's context."""
 
 
 @dataclass
@@ -81,9 +86,24 @@ def http_post_json(url: str, body: dict, headers: dict, timeout: float) -> dict:
         headers={"Content-Type": "application/json", **headers},
         method="POST",
     )
+    # urllib's timeout applies to each socket read, so a server sending one byte
+    # a second never trips it. The deadline covers the whole response.
+    deadline = time.monotonic() + timeout
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
+            chunks, size = [], 0
+            # read1: whatever has arrived. read(n) would block until n bytes or the
+            # end, so the deadline would never be checked while a server trickles.
+            while chunk := response.read1(65536):
+                chunks.append(chunk)
+                size += len(chunk)
+                if size > MAX_RESPONSE_BYTES:
+                    raise LLMError(f"{url} sent more than {MAX_RESPONSE_BYTES:,} bytes; giving up")
+                if time.monotonic() > deadline:
+                    raise TimeoutError
+            raw = b"".join(chunks)
+    except LLMError:
+        raise
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:2000]
         raise LLMError(f"HTTP {e.code} from {url}: {detail}", retryable=e.code in RETRY_STATUS) from None

@@ -2,8 +2,9 @@ import http.client
 import json
 import socket
 import threading
+import time
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
 import pytest
 
@@ -191,6 +192,41 @@ def test_http_errors_carry_the_server_message(tmp_path, local_server):
         OllamaBackend(cfg(tmp_path, base_url=local_server, model="missing")).chat([{"role": "user", "content": "x"}], None)
 
 
+class _TrickleHandler(BaseHTTPRequestHandler):
+    """Sends a valid response one byte every 0.3 s: each read is quick, the whole is not."""
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        body = b'{"message": {"content": "slow"}}'
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        for byte in body:
+            try:
+                self.wfile.write(bytes([byte]))
+                self.wfile.flush()
+            except OSError:
+                return
+            time.sleep(0.3)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_the_timeout_covers_the_whole_response_not_each_read():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _TrickleHandler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    start = time.monotonic()
+    try:
+        with pytest.raises(LLMError, match="timed out"):
+            http_post_json(f"http://127.0.0.1:{server.server_port}/api/chat", {}, {}, 1.5)
+        elapsed = time.monotonic() - start
+    finally:
+        server.shutdown()
+    assert elapsed < 4  # the full trickle takes ~10 s; each single read is well under the timeout
+
+
 def _closed_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -224,7 +260,8 @@ def test_non_json_body_is_an_llm_error(monkeypatch):
     class Resp:
         def __enter__(self): return self
         def __exit__(self, *a): return False
-        def read(self): return b"<html>502 Bad Gateway</html>"
+        body = [b"<html>502 Bad Gateway</html>"]
+        def read1(self, n=-1): return self.body.pop() if self.body else b""
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Resp())
     with pytest.raises(LLMError, match="did not return JSON"):
         http_post_json("http://x/api/chat", {}, {}, 1)

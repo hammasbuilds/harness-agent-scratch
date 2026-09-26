@@ -95,3 +95,15 @@ def test_git_summary_in_a_repo(tmp_path):
     assert summary.startswith("branch main, last commit ") and summary.endswith("first commit")
     run("checkout", "-q", "--detach")
     assert git_summary(tmp_path).startswith("branch (detached at ")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_git_summary_survives_non_ascii_commit_subjects(tmp_path):
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+    run = lambda *a: subprocess.run(["git", *a], cwd=tmp_path, env=env, check=True, capture_output=True)
+    run("init", "-q", "-b", "main")
+    (tmp_path / "f").write_text("x")
+    run("add", "f")
+    run("commit", "-q", "-m", "🐛 fix crash — naïve café")  # crashed the cp1252 decoder
+    assert git_summary(tmp_path).endswith("🐛 fix crash — naïve café")

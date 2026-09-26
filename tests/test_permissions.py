@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import pytest
 
 from harness.permissions import ALLOW, ASK, DENY, classify, is_secret_file
@@ -14,11 +17,20 @@ from harness.permissions import ALLOW, ASK, DENY, classify, is_secret_file
     "ls missing 2>/dev/null",
     "grep foo bar.txt 2>&1",
     "wc -l < file.txt",
-    "/usr/bin/ls",
-    "tree",
 ])
-def test_read_only_commands_run_at_once(command):
-    assert classify(command) == ALLOW
+def test_read_only_commands_run_at_once(command, tmp_path):
+    # A workspace is needed: without one, recursive reads cannot be checked and ask.
+    (tmp_path / "harness").mkdir()
+    assert classify(command, tmp_path.resolve()) == ALLOW
+
+
+@pytest.mark.parametrize("command", [
+    "/usr/bin/ls",  # a path, not a program name: once pinned as ALLOW by this very file
+    "./ls", "sub/cat a.txt", "../ls", "C:/Users/Public/cat.exe a.txt",
+    "tree", "sort a.txt", "file a.txt", "date",  # have writing/executing options; off the list
+])
+def test_command_names_must_be_bare_listed_programs(command, tmp_path):
+    assert classify(command, tmp_path) == ASK
 
 
 @pytest.mark.parametrize("command", [
@@ -127,7 +139,7 @@ def test_other_writing_forms_ask(command):
 
 def test_uniq_with_one_file_runs():
     assert classify("uniq -c words.txt") == ALLOW
-    assert classify("sort words.txt | uniq -c") == ALLOW
+    assert classify("cat words.txt | uniq -c") == ALLOW
 
 
 @pytest.mark.parametrize("command", [
@@ -205,6 +217,85 @@ def test_a_symlink_out_of_the_workspace_is_followed(box_ws):
     assert classify("cat link/secret.txt", box_ws) == ASK
     assert classify("cat li*/secret.txt", box_ws) == ASK
     assert classify("cat a.txt", box_ws) == ALLOW
+
+
+@pytest.mark.parametrize("command", [
+    # global options hide the real subcommand
+    "git --namespace log commit --allow-empty -m x",
+    "git --namespace status config core.fsmonitor evil",
+    "git --namespace diff push origin main",
+    "git -C log commit -am x",
+    "git --work-tree log checkout -- .",
+    "git -C sub log",
+    # pathspec magic and object paths reach past the workspace
+    "git show HEAD:.env", "git show :id_rsa", "git show HEAD:../outside.txt", "git ls-files :/",
+    "git diff HEAD -- :/",
+    # abbreviated long options
+    "git log --outp=x", "git diff --ext",
+])
+def test_git_is_allowed_only_in_its_plain_read_only_form(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+def test_git_asks_when_the_repository_is_bigger_than_the_workspace(tmp_path):
+    (tmp_path / ".git").mkdir()
+    ws = (tmp_path / "sub").resolve()
+    ws.mkdir()
+    assert classify("git log", ws) == ASK  # its history and diffs cover files outside ws
+    (ws / ".git").mkdir()
+    assert classify("git log", ws) == ALLOW
+
+
+@pytest.mark.parametrize("command", [
+    "date -f.env", "grep -f.env a.txt", "grep -fid_rsa a.txt",  # glued to a short option
+    "cat prod.env", "cat .git-credentials", "cat key.ppk", "cat .envrc",  # names the list lacked
+])
+def test_glued_and_newly_listed_credentials_ask(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+def test_a_bracket_glob_cannot_reach_a_hidden_secret(box_ws):
+    (box_ws / ".env").write_text("HARNESS_API_KEY=sk")
+    assert classify("cat [.]env", box_ws) == ASK  # Python's glob skips hidden files unless told not to
+    assert classify("cat .en?", box_ws) == ASK
+
+
+@pytest.mark.parametrize("command", ["cat a.txt", "cat a.txt | head -3"])
+def test_after_all_that_plain_reads_still_run(box_ws, command):
+    assert classify(command, box_ws) == ALLOW
+
+
+def test_recursive_readers_ask_only_when_the_workspace_holds_secrets(box_ws):
+    for command in ["grep -rn API_KEY .", "grep -R x src", "rg KEY", "diff -r . src", "grep --recursive x ."]:
+        assert classify(command, box_ws) == ALLOW, command
+    (box_ws / "src" / ".env").write_text("HARNESS_API_KEY=sk")
+    for command in ["grep -rn API_KEY .", "grep -R x src", "rg KEY", "diff -r . src", "grep --recursive x .",
+                    "grep -nr x ."]:
+        assert classify(command, box_ws) == ASK, command
+    assert classify("grep -n x a.txt", box_ws) == ALLOW  # not recursive
+
+
+@pytest.mark.parametrize("command", ["echo hi > -", "ls &> -", "echo hi > NUL", "cat a.txt <> b.txt"])
+def test_only_dev_null_is_a_harmless_redirect(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+@pytest.mark.parametrize("command", ["grep -rn shutdown src", "git log --grep=reboot", "cat docs/halt.md",
+                                     "grep -n mkfs a.txt"])
+def test_dangerous_words_as_arguments_are_not_denied(box_ws, command):
+    assert classify(command, box_ws) != DENY  # only as a command name, where they would run
+
+
+@pytest.mark.skipif(os.name != "nt", reason="8.3 short names are a Windows feature")
+def test_windows_short_names_are_resolved_before_the_check(box_ws):
+    import ctypes
+    (box_ws / ".env").write_text("x")
+    buf = ctypes.create_unicode_buffer(260)
+    ctypes.windll.kernel32.GetShortPathNameW(str(box_ws / ".env"), buf, 260)
+    short = Path(buf.value).name
+    if short.lower() == ".env":
+        pytest.skip("8.3 names are disabled on this volume")
+    assert classify(f"cat {short}", box_ws) == ASK
 
 
 def test_rm_rf_on_a_subfolder_asks_rather_than_denies():

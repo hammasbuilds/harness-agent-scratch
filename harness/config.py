@@ -20,10 +20,9 @@ DEFAULT_BASE_URLS = {
 # send the user's real API key elsewhere), not what runs commands or how they
 # are confined, not the model, and not num_gpu, which keeps a model that loads
 # onto the GPU from pushing a training job out of memory.
-PROJECT_SETTINGS = frozenset({
-    "HARNESS_TEMPERATURE", "HARNESS_MAX_STEPS", "HARNESS_SUBAGENT_MAX_STEPS",
-    "HARNESS_CONTEXT_LIMIT", "HARNESS_COMPACT_AT", "HARNESS_COMPACT_TO",
-})
+# Step counts and the context limit are left out too: on a paid API a cloned
+# repository could raise them to multiply what a session costs.
+PROJECT_SETTINGS = frozenset({"HARNESS_TEMPERATURE", "HARNESS_COMPACT_AT", "HARNESS_COMPACT_TO"})
 
 _QUOTED = re.compile(r"""(["'])(.*?)\1\s*(#.*)?$""")
 
@@ -52,7 +51,8 @@ def load_dotenv(path: Path, environ: dict | None = None, only: frozenset[str] | 
     if not path.is_file():
         return []
     ignored = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig: Notepad's BOM would otherwise become part of the first key.
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
