@@ -60,6 +60,15 @@ def test_prompt_lists_name_and_description_only(tmp_path):
     assert skills_prompt({}) == "No skills are installed."
 
 
+def test_a_wordy_skill_cannot_swell_the_system_prompt(tmp_path):
+    make_skill(tmp_path, "w", "---\nname: wordy\ndescription: " + "blah " * 5000 + "\n---\n")
+    for i in range(60):
+        make_skill(tmp_path, f"s{i:02d}", f"---\nname: skill{i:02d}\ndescription: {'does things ' * 20}\n---\n")
+    prompt = skills_prompt(discover_skills([tmp_path]))
+    assert len(prompt) <= 4200 and "more skills not listed" in prompt
+    assert "- skill00: does things" in prompt and "..." in prompt
+
+
 def test_default_dirs(tmp_path):
     assert default_skill_dirs(tmp_path / "ws", home=tmp_path / "h") == [
         tmp_path / "h" / ".agents" / "skills", tmp_path / "ws" / ".agents" / "skills"]

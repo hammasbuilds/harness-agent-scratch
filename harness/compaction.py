@@ -28,25 +28,36 @@ _RUN = re.compile(r"[A-Za-z]+|[0-9]|\s+|[^\sA-Za-z0-9]")
 SAFETY = 1.15
 
 
+_VOWELS = frozenset("aeiouAEIOU")
+
+
 def _letter_tokens(run: str) -> int:
-    # A run that switches case often is random (base64, API keys): ~1.5
-    # characters per token. Words and camelCase: about four.
+    """Random-looking letters cost about 1.5-1.9 characters a token; words about four.
+
+    Random in mixed case switches case often (base64, API keys). Random in one
+    case (DNA, protein sequences, base32, lowercase noise) is short of vowels:
+    about 19% against 35-40% for real words. Runs over 24 letters are rarely words.
+    """
+    n = len(run)
     switches = sum(1 for a, b in zip(run, run[1:]) if a.isupper() != b.isupper())
-    if len(run) >= 4 and switches * 3 >= len(run):
-        return math.ceil(len(run) / 1.5)
-    return math.ceil(len(run) / 4)
+    vowels = sum(c in _VOWELS for c in run) / n
+    if (n >= 4 and switches * 3 >= n) or (n >= 6 and vowels < 0.28) or (3 <= n < 6 and vowels < 0.2) or n > 24:
+        return math.ceil(n / 1.5)
+    return math.ceil(n / 4)
 
 
 def text_tokens(text: str) -> int:
     """A pessimistic token count, shaped like BPE pre-tokenisation.
 
-    Calibrated against the Qwen2.5 tokenizer on 23 kinds of text (prose, code,
-    JSON, CSV, `seq` output, hashes, base64, paths, CJK, Cyrillic, emoji, stack
-    traces): it never came out lower than the real count, and is about 1.4x
-    higher on average. Underestimating is the failure that matters, since Ollama
-    silently drops the start of an overlong prompt. The flat "characters / 3"
-    it replaced was 3x too low on digits (Qwen makes every digit a token), 2x on
-    JSON and `ls -la` output, 1.7x on punctuation.
+    Calibrated against the Qwen2.5 tokenizer on 27 kinds of text (prose, code,
+    JSON, CSV, `seq` output, hashes, base64, base32, paths, DNA and protein
+    sequences, random letters in either case, long words, CJK, Cyrillic, emoji):
+    on every one the real count was at most 0.92 of the estimate, which is about
+    1.6x the real count on average. Underestimating is the failure that matters,
+    since Ollama silently drops the start of an overlong prompt; overestimating
+    only compacts sooner. The flat "characters / 3" this replaced was 3x too low
+    on digits (Qwen makes every digit a token) and 2x on JSON; the version before
+    this one was 2x too low on single-case random letters such as DNA.
     """
     n = 0
     for m in _RUN.finditer(text):

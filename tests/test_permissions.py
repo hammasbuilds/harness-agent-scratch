@@ -317,15 +317,40 @@ def test_git_asks_before_printing_file_contents_from_history(box_ws, command):
     assert classify(command, box_ws) == ASK
 
 
-@pytest.mark.parametrize("command", ["git log --oneline -5", "git log --stat", "git status", "git diff",
-                                     "git diff a.txt", "git diff --stat"])
-def test_git_without_history_contents_still_runs(box_ws, command):
+@pytest.mark.parametrize("command", [
+    "git log --oneline -5", "git log --stat", "git log -n 3 --format=%h", "git log --oneline -- a.txt",
+    "git status", "git status -sb", "git status --porcelain", "git diff --stat", "git diff --name-only HEAD~3",
+    "git diff --cached --name-status", "git rev-parse --show-toplevel", "git ls-files",
+])
+def test_git_without_file_contents_still_runs(box_ws, command):
     assert classify(command, box_ws) == ALLOW
 
 
-def test_git_diff_of_the_working_tree_asks_when_it_holds_credentials(box_ws):
-    (box_ws / "src" / ".env").write_text("HARNESS_API_KEY=sk")
-    assert classify("git diff", box_ws) == ASK
+@pytest.mark.parametrize("command", [
+    "git diff", "git diff a.txt", "git diff --cached",  # a deleted, still-tracked .env shows as removed lines
+    "git log --binary -1",  # implies --patch; missed by a list of patch options
+    "git log --bin", "git log --dd", "git status -v", "git status --verbose", "git blame a.txt",
+    "git diff --stat -p",
+])
+def test_git_options_that_print_file_contents_ask(box_ws, command):
+    assert classify(command, box_ws) == ASK
+
+
+@pytest.mark.parametrize("command", [
+    "cat -- --/../../secret.txt",  # after --, `--/..` is a path, not an option
+    "cat -- --/../.env",
+    "grep -r TOP -- --/../..",
+    "uniq a.txt -- --/../.git/config",  # two operands: overwrites the second
+    "cat --/../../secret.txt",
+])
+def test_the_end_of_options_marker_is_followed(box_ws, command):
+    (box_ws / "--").mkdir()
+    assert classify(command, box_ws) == ASK
+
+
+def test_plain_operands_after_the_marker_still_run(box_ws):
+    assert classify("cat -- a.txt", box_ws) == ALLOW
+    assert classify("grep -n x -- a.txt", box_ws) == ALLOW
 
 
 def test_find_reading_start_points_from_a_file_asks(box_ws):

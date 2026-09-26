@@ -82,7 +82,24 @@ def discover_skills(dirs: list[Path]) -> dict[str, Skill]:
     return skills
 
 
+# The listing sits in the fixed system prompt of every request. A cloned repo's
+# single wordy SKILL.md made every request overflow, with nothing /clear could fix.
+MAX_DESCRIPTION_CHARS = 300
+MAX_LISTING_CHARS = 4000
+
+
 def skills_prompt(skills: dict[str, Skill]) -> str:
     if not skills:
         return "No skills are installed."
-    return "\n".join(f"- {s.name}: {s.description}" for s in sorted(skills.values(), key=lambda s: s.name))
+    lines, used = [], 0
+    ordered = sorted(skills.values(), key=lambda s: s.name)
+    for n, s in enumerate(ordered):
+        desc = s.description if len(s.description) <= MAX_DESCRIPTION_CHARS else \
+            s.description[:MAX_DESCRIPTION_CHARS].rstrip() + "..."
+        line = f"- {s.name[:80]}: {desc}"
+        if used + len(line) > MAX_LISTING_CHARS:
+            lines.append(f"- ... and {len(ordered) - n} more skills not listed (the listing is capped)")
+            break
+        lines.append(line)
+        used += len(line) + 1
+    return "\n".join(lines)

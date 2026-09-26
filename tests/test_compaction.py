@@ -43,6 +43,22 @@ def test_estimate_is_pessimistic_for_random_strings():
     assert text_tokens(text) >= 2230
 
 
+@pytest.mark.parametrize("alphabet", ["ACGT", "ACDEFGHIKLMNPQRSTVWY", "abcdefghijklmnopqrstuvwxyz",
+                                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"])
+def test_estimate_is_pessimistic_for_single_case_random_letters(alphabet):
+    # DNA, protein, lowercase noise and base32 measured 0.51-0.60 Qwen tokens per
+    # character; the estimate was 0.29 when only case switches marked randomness.
+    import random
+    rng = random.Random(7)
+    text = "".join(rng.choice(alphabet) for _ in range(3000))
+    assert text_tokens(text) >= 0.6 * len(text)
+
+
+def test_real_words_are_not_priced_as_random():
+    prose = "the agent reads a file, changes one line and runs the tests again. " * 40
+    assert text_tokens(prose) < len(prose) / 2  # Qwen gives about one token per 4.5 characters here
+
+
 def test_estimate_is_pessimistic_for_non_latin_text_too():
     msgs = [{"role": "user", "content": "字" * 4000}]
     assert estimate_tokens(msgs) >= 4000  # tokenizers give about one token per CJK character; chars/3 gave 1,343

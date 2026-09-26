@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -52,9 +53,20 @@ def scripted_model() -> ScriptedLLM:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--scripted", action="store_true", help="use pre-written replies instead of a model")
+    ap.add_argument("--keep", action="store_true", help="keep the throwaway workspace afterwards")
     args = ap.parse_args()
 
     workspace = Path(tempfile.mkdtemp(prefix="harness-demo-")).resolve()
+    try:
+        return run(args, workspace)
+    finally:
+        if args.keep:
+            print(f"\nworkspace kept at {workspace}")
+        else:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+
+def run(args, workspace: Path) -> int:
     env = dict(os.environ)
     load_dotenv(Path(__file__).parent / ".env", env)
     cfg = Config.from_env(workspace, env)

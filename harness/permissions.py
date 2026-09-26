@@ -44,7 +44,8 @@ READ_ONLY = {
     "find", "which", "whoami", "stat", "du", "df", "basename", "dirname", "realpath", "true", "false",
     "nl", "cut", "diff", "uniq",
 }
-GIT_READ_ONLY = {"status", "log", "diff", "show", "rev-parse", "ls-files", "blame"}
+# show and blame print file contents from any revision, so they always ask.
+GIT_READ_ONLY = {"status", "log", "diff", "rev-parse", "ls-files"}
 # Options that write, execute or read indirectly, for the programs where such
 # options are whole words (find) or are checked beside other rules (git, whose
 # long options are also matched by prefix, since it accepts `--outp` for
@@ -331,42 +332,48 @@ def _git_ok(args: list[str], workspace: Path | None) -> bool:
         return False  # pathspec magic (:/) and object paths (HEAD:../x) reach past the workspace
     if any(_flag_matches(a, UNSAFE_FLAGS["git"]) for a in rest):
         return False
-    if _shows_history(sub, rest, workspace):
+    if not _git_flags_ok(sub, rest):
         return False
     return workspace is None or (_repo_is_workspace(workspace) and repo_is_inert(workspace))
 
 
-# git log options that print file contents from history rather than just commits.
-_PATCH_LONG = ("--patch", "--word-diff", "--color-words", "--full-diff", "--cc", "--diff-merges", "--remerge-diff")
+# The options each git subcommand may use without asking: ones that print
+# commits, names and counts, never file contents. History can hold a credentials
+# file that was committed and later deleted, beyond any scan of the workspace,
+# and every list of "options that print contents" went stale (-p, then --binary,
+# then status -v, then a bare diff of a deleted .env), so this is an allowlist.
+# Long options must be spelled out: git accepts abbreviations, which only ask.
+_GIT_LOG_FLAGS = {
+    "--oneline", "--graph", "--all", "--branches", "--tags", "--decorate", "--no-decorate", "--reverse",
+    "--stat", "--shortstat", "--name-only", "--name-status", "--no-merges", "--merges", "--first-parent",
+    "--abbrev-commit", "--since", "--until", "--after", "--before", "--author", "--committer", "--grep",
+    "--max-count", "--skip", "--format", "--pretty", "--date", "--relative-date", "--topo-order",
+    "--date-order", "--no-color", "--left-right", "--follow", "--", "-n",
+}
+_GIT_DIFF_NAMES = {"--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--summary", "--dirstat"}
+_GIT_DIFF_FLAGS = _GIT_DIFF_NAMES | {"--cached", "--staged", "--no-color", "--relative", "--no-renames", "--"}
+_GIT_STATUS_FLAGS = {"--short", "--branch", "--porcelain", "--long", "--untracked-files", "--ignored",
+                     "--no-renames", "--ahead-behind", "--no-ahead-behind", "--show-stash", "--column",
+                     "--no-column", "--"}
+_GIT_STATUS_SHORT = set("sbzu")
+_GIT_FREE = {"rev-parse", "ls-files"}  # they print names and hashes whatever their options
 
 
-def _shows_history(sub: str, rest: list[str], workspace: Path | None) -> bool:
-    """Would this print the contents of old versions of files?
-
-    History can hold a credentials file that was committed and later deleted,
-    which no scan of the workspace can see: `git show HEAD~1` printed an old
-    .env. So `show` always asks, `log` asks when it prints patches, and `diff`
-    asks when it compares anything but the working tree and index.
-    """
-    if sub == "show":
+def _git_flags_ok(sub: str, rest: list[str]) -> bool:
+    if sub in _GIT_FREE:
         return True
+    options = [a for a in rest if a.startswith("-")]
     if sub == "log":
-        for a in rest:
-            if a.startswith("--"):
-                if a.split("=", 1)[0].startswith(_PATCH_LONG):
-                    return True
-            elif a.startswith("-") and not a[1:].isdigit() and any(c in a[1:] for c in "puLcm"):
-                return True  # -p, -u, -L, -c, -m, also inside a bundle
+        return all(a.split("=", 1)[0] in _GIT_LOG_FLAGS or re.fullmatch(r"-n?\d+", a) for a in options)
     if sub == "diff":
-        operands = [a for a in rest if not a.startswith("-")]
-        if "--" in rest:
-            operands = [a for a in rest[:rest.index("--")] if not a.startswith("-")]
-        # A bare word that is not an existing path is a revision (HEAD~1, a branch).
-        if any(workspace is None or not os.path.lexists(workspace / a) for a in operands):
-            return True
-        # Even the working tree: it prints tracked files' contents, like grep -r.
-        if workspace is None or workspace_exposure(workspace)[0]:
-            return True
+        # Only the name and count forms: any patch, of the working tree too, can
+        # print a deleted file's old contents.
+        return any(a.split("=", 1)[0] in _GIT_DIFF_NAMES for a in options) and \
+            all(a.split("=", 1)[0] in _GIT_DIFF_FLAGS for a in options)
+    if sub == "status":  # -v prints the staged diff
+        return all(a.split("=", 1)[0] in _GIT_STATUS_FLAGS or
+                   (not a.startswith("--") and set(a[1:].split("=", 1)[0]) <= _GIT_STATUS_SHORT)
+                   for a in options)
     return False
 
 
@@ -433,8 +440,15 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
             return ASK
         elif any(_flag_matches(a, UNSAFE_FLAGS.get(name, set())) for a in args):
             return ASK
+        # After `--`, every argument is an operand, however it starts: `cat -- --/../x`
+        # reads ../x. Options are only what comes before it.
+        if "--" in args:
+            cut = args.index("--")
+            options, operands = args[:cut], args[cut + 1:]
+        else:
+            options, operands = args, []
         # `uniq IN OUT` overwrites OUT.
-        if name == "uniq" and len([a for a in args if not a.startswith("-") or a == "-"]) >= 2:
+        if name == "uniq" and len([a for a in options if not a.startswith("-") or a == "-"]) + len(operands) >= 2:
             return ASK
         reads_tree, follows = _recursive(name, args), _follows_links(name, args)
         if reads_tree or follows:
@@ -443,8 +457,11 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
             secrets, outward = workspace_exposure(workspace)
             if outward or (reads_tree and secrets):
                 return ASK
-        for a in args:
+        for a in options:
             read_targets += _candidates(a)
+            if a.startswith("--") and "=" not in a and ("/" in a or "\\" in a or ".." in a):
+                return ASK  # not a real option; some programs take it as a path
+        read_targets += operands
 
     if any(unsafe_target(t, workspace) for t in read_targets if t):
         return ASK

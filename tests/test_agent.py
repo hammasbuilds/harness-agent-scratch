@@ -132,7 +132,7 @@ def test_max_steps_stops_a_runaway_loop(cfg, make_agent):
 
 
 def test_compaction_kicks_in_and_moves_history_into_the_system_prompt(cfg, make_agent, workspace):
-    (workspace / "big.txt").write_text("z" * 300)
+    (workspace / "big.txt").write_text("some notes " * 27)
     llm = ScriptedLLM([
         Reply("", [call("read_file", path="big.txt")]),
         Reply("first done"),
@@ -146,7 +146,7 @@ def test_compaction_kicks_in_and_moves_history_into_the_system_prompt(cfg, make_
     agent.send("read big.txt")
     assert "compacted" not in events
     # The new question alone overflows, so the first turn has to go.
-    agent.send("now summarise " + "q" * 1200)
+    agent.send("now summarise " + "the question " * 92)
     assert "compacted" in events
     assert agent.summary == "HANDOFF: read big.txt, it is all z"
     assert "HANDOFF" in agent.system_message()["content"]
@@ -217,7 +217,7 @@ def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_ag
     """The reviewer's case: 8 reads of ~2,400 characters in one reply. There is
     no older turn to compact, so the current turn's outputs must shrink."""
     for i in range(8):
-        (workspace / f"f{i}.txt").write_text(chr(97 + i) * 2400)
+        (workspace / f"f{i}.txt").write_text(f"line {chr(97 + i)} of words " * 150)
     llm = ScriptedLLM([Reply("", [call("read_file", path=f"f{i}.txt") for i in range(8)]), Reply("done")])
     events = []
     agent = make_agent(llm, on_event=lambda k, d: events.append(k))
@@ -229,7 +229,7 @@ def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_ag
     assert "squeezed" in events  # and no ContextOverflow: the request fit after squeezing
     outputs = [m["content"] for m in agent.messages if m["role"] == "tool"]
     assert outputs[0].endswith("removed to fit the context]")  # oldest cut first
-    assert outputs[-1] == "h" * 2400  # the latest kept whole while it fits
+    assert outputs[-1] == "line h of words " * 150  # the latest kept whole while it fits
 
 
 def test_big_call_arguments_are_trimmed_once_their_call_has_run(cfg, make_agent, workspace):
