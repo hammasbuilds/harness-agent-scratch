@@ -29,6 +29,14 @@ SAFETY = 1.15
 
 
 _VOWELS = frozenset("aeiouAEIOU")
+# Scripts the tokenizer has large vocabularies for: about one token a character.
+_CJK_RANGES = ((0x3000, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF), (0xF900, 0xFAFF),
+               (0xFF00, 0xFFEF))
+
+
+def _is_cjk(c: str) -> bool:
+    o = ord(c)
+    return any(lo <= o <= hi for lo, hi in _CJK_RANGES)
 
 
 def _letter_tokens(run: str) -> int:
@@ -69,8 +77,12 @@ def text_tokens(text: str) -> int:
             n += 1 if "\n" in run else 0  # a space merges into the next word
         elif ord(c) > 0xFFFF:
             n += 3  # emoji and other astral characters take several byte tokens
+        elif 0x2000 <= ord(c) <= 0x2BFF:
+            n += 3  # symbols (arrows, math, box drawing, Braille spinners): one token per UTF-8 byte
+        elif ord(c) > 0x7FF and not _is_cjk(c):
+            n += 2  # other three-byte scripts, rarely merged: Ethiopic, Devanagari, Georgian
         else:
-            n += 1  # each digit, punctuation mark, CJK or Cyrillic character
+            n += 1  # each digit, punctuation mark, CJK, Latin-1 or Cyrillic character
     return math.ceil(n * SAFETY)
 
 

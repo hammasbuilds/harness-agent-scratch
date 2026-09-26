@@ -54,6 +54,16 @@ def test_estimate_is_pessimistic_for_single_case_random_letters(alphabet):
     assert text_tokens(text) >= 0.6 * len(text)
 
 
+@pytest.mark.parametrize("text, real", [
+    # Qwen2.5 counts for these exact strings, measured with its tokenizer.json.
+    (("⠋ building ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏ " * 150)[:3000], 3200),  # CLI spinners: 1.65x under before
+    (("ሰላም ልዑል ዓለም ይህ የሙከራ ጽሑፍ ነው። " * 150)[:3000], 3963),  # Amharic: 1.35x under before
+    (("नमस्ते दुनिया, यह एक परीक्षण है। " * 120)[:3000], 2908),
+])
+def test_estimate_is_pessimistic_for_three_byte_scripts_and_symbols(text, real):
+    assert text_tokens(text) >= real
+
+
 def test_real_words_are_not_priced_as_random():
     prose = "the agent reads a file, changes one line and runs the tests again. " * 40
     assert text_tokens(prose) < len(prose) / 2  # Qwen gives about one token per 4.5 characters here

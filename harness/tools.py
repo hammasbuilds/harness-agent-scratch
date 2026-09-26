@@ -26,7 +26,7 @@ from . import permissions
 from .config import Config
 from .context import fingerprint
 from .llm import LLMError
-from .sandbox import Sandbox, find_shell
+from .sandbox import COMMAND_VAR, Sandbox, find_shell
 from .skills import Skill
 from .todos import TodoError, TodoList
 
@@ -147,7 +147,10 @@ def decode(raw: bytes) -> tuple[str, str]:
     """
     for bom, encoding in _BOMS:
         if raw.startswith(bom):
-            return raw[len(bom):].decode(encoding.removesuffix("+bom")), encoding
+            try:
+                return raw[len(bom):].decode(encoding.removesuffix("+bom")), encoding
+            except UnicodeDecodeError:
+                break  # a BOM-shaped start on bytes that are not that encoding: fall back below
     try:
         return raw.decode("utf-8"), "utf-8"
     except UnicodeDecodeError:
@@ -266,7 +269,8 @@ def _kill_tree(proc: subprocess.Popen, job: "_WindowsJob | None" = None) -> None
     if job is not None:
         job.kill()
     elif os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        taskkill = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe")
+        subprocess.run([taskkill, "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
     else:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -300,7 +304,7 @@ class Toolbox:
         # would need a yes is simply refused.
         self.read_only = read_only
         self.spill_prefix = spill_prefix
-        self.shell_argv, self.shell_name = find_shell(cfg.shell)
+        self.shell_argv, self.shell_name = find_shell(cfg.shell, workspace=self.workspace)
         self.cmd_shell = Path(self.shell_argv[0]).name.lower() in ("cmd", "cmd.exe")
         # (mtime_ns, size) of every file at the moment the agent last read or
         # wrote it. context.py reports drift; str_replace refuses stale edits.
@@ -539,12 +543,12 @@ class Toolbox:
             if not self.approve(f"run: {command}"):
                 raise ToolError("the user declined to run this command")
         timeout = max(1, min(int(timeout), MAX_BASH_TIMEOUT))
-        argv = self.sandbox.wrap([*self.shell_argv, command])
+        argv = self.sandbox.wrap(self.shell_argv)  # the command itself goes in COMMAND_VAR
         group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
                  else {"start_new_session": True})
         proc = subprocess.Popen(argv, cwd=self.workspace, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                env=command_env(os.environ), **group)
+                                env={**command_env(os.environ), COMMAND_VAR: command}, **group)
         job = _contain(proc)
         out_cap, err_cap = _Capture(proc.stdout), _Capture(proc.stderr)
         try:

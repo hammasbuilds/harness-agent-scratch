@@ -407,6 +407,12 @@ def test_mixed_file_edit_spanning_a_crlf_line(box, workspace):
     assert f.read_bytes() == b"A\r\nB\r\nc\n"
 
 
+def test_a_bom_shaped_start_on_odd_bytes_still_reads(box, workspace):
+    (workspace / "odd.txt").write_bytes(codecs.BOM_UTF16_LE + b"abc")  # odd length: not really UTF-16
+    out = run(box, "read_file", path="odd.txt")
+    assert not out.startswith("error: bad arguments")  # the message once blamed the arguments
+
+
 def test_write_file_does_not_double_carriage_returns(box, workspace):
     f = workspace / "win.txt"
     f.write_bytes(b"old\r\n")

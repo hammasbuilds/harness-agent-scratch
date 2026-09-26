@@ -175,6 +175,10 @@ def unsafe_target(token: str, workspace: Path | None) -> bool:
         except TypeError:  # Python 3.10
             matches = glob.glob(pattern) + [m for m in glob.glob(str(Path(pattern).parent / ".*"))
                                             if Path(m).name != ".."]
+        # A file the model named `-delete` or `--output=x` becomes an option once
+        # the shell expands the glob: `find *` would then delete.
+        if any(Path(m).name.startswith("-") for m in matches):
+            return True
         return any(_outside_or_secret(m, workspace) for m in matches)
     if pathlike or os.path.lexists(workspace / token):
         return _outside_or_secret(token, workspace)
@@ -447,9 +451,11 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
             options, operands = args[:cut], args[cut + 1:]
         else:
             options, operands = args, []
-        # `uniq IN OUT` overwrites OUT.
-        if name == "uniq" and len([a for a in options if not a.startswith("-") or a == "-"]) + len(operands) >= 2:
-            return ASK
+        # `uniq IN OUT` overwrites OUT, and one glob can expand to both.
+        if name == "uniq":
+            uniq_operands = [a for a in options if not a.startswith("-") or a == "-"] + operands
+            if len(uniq_operands) >= 2 or any(_GLOB & set(a) for a in uniq_operands):
+                return ASK
         reads_tree, follows = _recursive(name, args), _follows_links(name, args)
         if reads_tree or follows:
             if workspace is None:

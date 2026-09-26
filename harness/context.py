@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 
 from .permissions import repo_config_is_plain
+from .sandbox import trusted_which
 from .todos import TodoList
 
 # The reminder rides in every request and cannot be trimmed, so every part of
@@ -39,14 +40,16 @@ def _git_dir(workspace: Path) -> Path | None:
 
 def git_summary(workspace: Path) -> str | None:
     git_dir = _git_dir(workspace)
-    if git_dir is None:
+    # An absolute git from PATH: never one the repository itself ships.
+    git_exe = trusted_which("git", workspace)
+    if git_dir is None or git_exe is None:
         return None
 
     def git(*args: str) -> str | None:
         try:
             # git prints UTF-8; the locale codec (cp1252 here) failed on an emoji
             # in a commit subject and took the whole session down with it.
-            out = subprocess.run(["git", f"--git-dir={git_dir}", "-c", "core.fsmonitor=false",
+            out = subprocess.run([git_exe, f"--git-dir={git_dir}", "-c", "core.fsmonitor=false",
                                   "-c", "log.showSignature=false", *args],
                                  cwd=workspace, capture_output=True, encoding="utf-8",
                                  errors="replace", timeout=5, stdin=subprocess.DEVNULL)

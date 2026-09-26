@@ -348,6 +348,18 @@ def test_the_end_of_options_marker_is_followed(box_ws, command):
     assert classify(command, box_ws) == ASK
 
 
+def test_a_glob_that_expands_to_an_option_shaped_name_asks(box_ws):
+    (box_ws / "-delete").write_text("")  # write_file can make this without asking
+    assert classify("find *", box_ws) == ASK
+    assert classify("ls src", box_ws) == ALLOW
+
+
+@pytest.mark.parametrize("command", ["uniq *.log", "uniq -c *.log", "uniq -- *.log"])
+def test_uniq_with_a_glob_asks(box_ws, command):
+    # *.log can expand to IN OUT, and uniq overwrites OUT: b.log lost its data.
+    assert classify(command, box_ws) == ASK
+
+
 def test_plain_operands_after_the_marker_still_run(box_ws):
     assert classify("cat -- a.txt", box_ws) == ALLOW
     assert classify("grep -n x -- a.txt", box_ws) == ALLOW
