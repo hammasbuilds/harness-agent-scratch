@@ -101,11 +101,12 @@ CMD_RUNNER = f"%{COMMAND_VAR}%"
 
 
 def trusted_which(name: str, workspace: Path | None = None,
-                  which: Callable[[str], str | None] = shutil.which) -> str | None:
+                  which: Callable[[str], str | None] = shutil.which,
+                  isabs: Callable[[str], bool] = os.path.isabs) -> str | None:
     """An absolute path to `name` from PATH, never relative (a `.` in PATH) and
     never inside the workspace, where a repository could have put its own."""
     found = which(name)
-    if not found or not os.path.isabs(found):
+    if not found or not isabs(found):
         return None
     if workspace is not None:
         try:
@@ -128,7 +129,10 @@ def find_shell(configured: str | None = None, system: str | None = None,
                workspace: Path | None = None) -> tuple[list[str], str]:
     """Return (argv, description): the argv runs whatever is in COMMAND_VAR."""
     system = system or platform.system()
-    find = lambda name: trusted_which(name, workspace, which)  # noqa: E731
+    # Judge absoluteness by the target system's rules, so the Windows branch
+    # behaves the same when it is exercised on a Linux CI runner.
+    isabs = ntpath.isabs if system == "Windows" else os.path.isabs
+    find = lambda name: trusted_which(name, workspace, which, isabs)  # noqa: E731
     if configured:
         if configured.lower().removesuffix(".exe").endswith("cmd"):
             return [configured, "/d", "/c", CMD_RUNNER], "cmd.exe (Windows command syntax)"

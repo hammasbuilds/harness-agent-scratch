@@ -190,6 +190,12 @@ def http_post_json(url: str, body: dict, headers: dict, timeout: float) -> dict:
         timer.cancel()
         conn.close()
 
+    # On Linux, closing the socket at the deadline reads as a clean end of data,
+    # not an error: without this check a timeout came back as "no usable JSON",
+    # and a cut-off body could even parse. An error status that arrived in time
+    # is still reported as itself, with its Retry-After; only its body was cut.
+    if expired.is_set() and status < 300:
+        raise LLMError(f"timed out after {timeout:.0f}s waiting for {url}")
     if 300 <= status < 400:
         raise LLMError(f"HTTP {status} from {url}: redirect to {reply_headers.get('Location')!r} not followed "
                        "(it would carry the API key to another address)")
