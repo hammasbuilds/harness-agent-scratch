@@ -12,19 +12,29 @@ from harness.todos import TodoError, TodoList
 
 def test_todo_list_renders_status_marks():
     todos = TodoList()
-    out = todos.replace([{"content": "write hello.txt", "status": "completed"},
-                         {"content": "star pattern", "status": "in_progress"},
-                         {"content": "fibonacci", "status": "pending"}])
+    out = todos.replace(
+        [
+            {"content": "write hello.txt", "status": "completed"},
+            {"content": "star pattern", "status": "in_progress"},
+            {"content": "fibonacci", "status": "pending"},
+        ]
+    )
     assert out == "[x] write hello.txt\n[>] star pattern\n[ ] fibonacci"
 
 
-@pytest.mark.parametrize("raw, message", [
-    ("not a list", "must be a list"),
-    (["text"], "not an object"),
-    ([{"content": " ", "status": "pending"}], "no content"),
-    ([{"content": "a", "status": "doing"}], "status 'doing'"),
-    ([{"content": "a", "status": "in_progress"}, {"content": "b", "status": "in_progress"}], "only one"),
-])
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ("not a list", "must be a list"),
+        (["text"], "not an object"),
+        ([{"content": " ", "status": "pending"}], "no content"),
+        ([{"content": "a", "status": "doing"}], "status 'doing'"),
+        (
+            [{"content": "a", "status": "in_progress"}, {"content": "b", "status": "in_progress"}],
+            "only one",
+        ),
+    ],
+)
 def test_todo_validation(raw, message):
     todos = TodoList()
     todos.replace([{"content": "keep me", "status": "pending"}])
@@ -45,15 +55,22 @@ def test_todo_list_size_is_bounded():
 
 def test_the_reminder_shows_only_open_todos():
     todos = TodoList()
-    todos.replace([{"content": f"done {i}", "status": "completed"} for i in range(5)]
-                  + [{"content": "now", "status": "in_progress"}, {"content": "next", "status": "pending"}])
+    todos.replace(
+        [{"content": f"done {i}", "status": "completed"} for i in range(5)]
+        + [{"content": "now", "status": "in_progress"}, {"content": "next", "status": "pending"}]
+    )
     assert todos.render_open() == "[>] now\n[ ] next\n(5 completed)"
 
 
 def test_reminder_parts_are_bounded(tmp_path):
     seen = {tmp_path / f"gone{i}.txt": (0, 0) for i in range(50)}
-    text = build_reminder(workspace=tmp_path, todos=TodoList(), seen=seen, today=date(2026, 1, 1),
-                          git="branch main, last commit abc " + "s" * 5000)
+    text = build_reminder(
+        workspace=tmp_path,
+        todos=TodoList(),
+        seen=seen,
+        today=date(2026, 1, 1),
+        git="branch main, last commit abc " + "s" * 5000,
+    )
     assert "... and 30 more" in text and len(text) < 7000
 
 
@@ -88,7 +105,9 @@ def test_reminder_contents(tmp_path):
     f.parent.mkdir()
     f.write_text("x")
     seen = {f: (0, 0)}
-    text = build_reminder(workspace=tmp_path, todos=todos, seen=seen, today=date(2026, 9, 26), git="branch main")
+    text = build_reminder(
+        workspace=tmp_path, todos=todos, seen=seen, today=date(2026, 9, 26), git="branch main"
+    )
     assert text.startswith("<system-reminder>") and text.endswith("</system-reminder>")
     assert "Today: 2026-09-26" in text
     assert "Git: branch main" in text
@@ -97,7 +116,9 @@ def test_reminder_contents(tmp_path):
 
 
 def test_reminder_minimal(tmp_path):
-    text = build_reminder(workspace=tmp_path, todos=TodoList(), seen={}, today=date(2026, 1, 1), git=None)
+    text = build_reminder(
+        workspace=tmp_path, todos=TodoList(), seen={}, today=date(2026, 1, 1), git=None
+    )
     assert "Git" not in text and "Todo" not in text and "changed on disk" not in text
 
 
@@ -109,11 +130,15 @@ def test_git_summary_never_uses_a_repository_planted_at_the_root(tmp_path, monke
     # HEAD + objects/ + refs/ + config written by the model would make git treat
     # the root as a repo, and its config could run a program on `git log`.
     ran = []
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(a) or (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: ran.append(a) or (_ for _ in ()).throw(OSError())
+    )
     (tmp_path / "HEAD").write_text("ref: refs/heads/main\n")
     (tmp_path / "objects").mkdir()
     (tmp_path / "refs").mkdir()
-    (tmp_path / "config").write_text("[gpg]\n\tprogram = ./evil.sh\n[log]\n\tshowSignature = true\n")
+    (tmp_path / "config").write_text(
+        "[gpg]\n\tprogram = ./evil.sh\n[log]\n\tshowSignature = true\n"
+    )
     assert git_summary(tmp_path.resolve()) is None
     assert ran == []  # git was not even started
 
@@ -128,9 +153,17 @@ def test_git_summary_skips_a_repository_whose_config_runs_programs(tmp_path, mon
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_git_summary_in_a_repo(tmp_path):
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
-    run = lambda *a: subprocess.run(["git", *a], cwd=tmp_path, env=env, check=True, capture_output=True)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+    def run(*a):
+        return subprocess.run(["git", *a], cwd=tmp_path, env=env, check=True, capture_output=True)
+
     run("init", "-q", "-b", "main")
     assert git_summary(tmp_path) == "branch main, no commits yet"
     (tmp_path / "f").write_text("x")
@@ -144,9 +177,17 @@ def test_git_summary_in_a_repo(tmp_path):
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 def test_git_summary_survives_non_ascii_commit_subjects(tmp_path):
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
-    run = lambda *a: subprocess.run(["git", *a], cwd=tmp_path, env=env, check=True, capture_output=True)
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+    def run(*a):
+        return subprocess.run(["git", *a], cwd=tmp_path, env=env, check=True, capture_output=True)
+
     run("init", "-q", "-b", "main")
     (tmp_path / "f").write_text("x")
     run("add", "f")

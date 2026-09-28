@@ -12,11 +12,14 @@ license = { text = "MIT" }
 authors = [{ name = "Muhammad Hammas" }]
 dependencies = []
 
-[project.optional-dependencies]
-dev = ["pytest>=7"]
-
 [project.scripts]
 harness = "harness.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=7", "ruff==0.16.7"]
+# Only scripts/calibrate_tokens.py uses it, to count tokens with the real Qwen2.5
+# tokenizer. The harness never imports it.
+calibrate = ["tokenizers>=0.20"]
 
 [tool.setuptools.packages.find]
 include = ["harness*"]
@@ -24,3 +27,11 @@ include = ["harness*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# ruff's defaults plus the house set (pycodestyle, isort, pyupgrade, bugbear, simplify).
+extend-select = ["E", "I", "UP", "B", "SIM"]

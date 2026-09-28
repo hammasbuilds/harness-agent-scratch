@@ -40,9 +40,33 @@ from pathlib import Path
 ALLOW, ASK, DENY = "allow", "ask", "deny"
 
 READ_ONLY = {
-    "ls", "dir", "pwd", "echo", "printf", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep",
-    "find", "which", "whoami", "stat", "du", "df", "basename", "dirname", "realpath", "true", "false",
-    "nl", "cut", "diff", "uniq",
+    "ls",
+    "dir",
+    "pwd",
+    "echo",
+    "printf",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "grep",
+    "egrep",
+    "fgrep",
+    "find",
+    "which",
+    "whoami",
+    "stat",
+    "du",
+    "df",
+    "basename",
+    "dirname",
+    "realpath",
+    "true",
+    "false",
+    "nl",
+    "cut",
+    "diff",
+    "uniq",
 }
 # show and blame print file contents from any revision, so they always ask.
 GIT_READ_ONLY = {"status", "log", "diff", "rev-parse", "ls-files"}
@@ -53,9 +77,27 @@ GIT_READ_ONLY = {"status", "log", "diff", "rev-parse", "ls-files"}
 UNSAFE_FLAGS = {
     # -files0-from (GNU find 4.9+) takes its starting points from a file the
     # model can write, which could list anything outside the workspace.
-    "find": {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls",
-             "-files0-from"},
-    "git": {"--output", "--ext-diff", "--textconv", "--exec", "--upload-pack", "--open-files-in-pager", "-O"},
+    "find": {
+        "-exec",
+        "-execdir",
+        "-delete",
+        "-ok",
+        "-okdir",
+        "-fprint",
+        "-fprint0",
+        "-fprintf",
+        "-fls",
+        "-files0-from",
+    },
+    "git": {
+        "--output",
+        "--ext-diff",
+        "--textconv",
+        "--exec",
+        "--upload-pack",
+        "--open-files-in-pager",
+        "-O",
+    },
     # Read the names of the files to read from another file, which the model can
     # write without asking and fill with paths outside the workspace.
     "wc": {"--files0-from"},
@@ -67,8 +109,21 @@ UNSAFE_FLAGS = {
 # unpacked archive can bring one. A list of dangerous keys missed three of them,
 # so this is the keys a plain `git init`/`git clone` writes, and nothing else.
 _GIT_PLAIN_KEYS = {
-    "core": {"repositoryformatversion", "filemode", "bare", "logallrefupdates", "symlinks", "ignorecase",
-             "autocrlf", "eol", "safecrlf", "precomposeunicode", "longpaths", "quotepath", "checkstat"},
+    "core": {
+        "repositoryformatversion",
+        "filemode",
+        "bare",
+        "logallrefupdates",
+        "symlinks",
+        "ignorecase",
+        "autocrlf",
+        "eol",
+        "safecrlf",
+        "precomposeunicode",
+        "longpaths",
+        "quotepath",
+        "checkstat",
+    },
     "remote": {"url", "pushurl", "fetch", "tagopt", "prune", "promisor", "partialclonefilter"},
     "branch": {"remote", "merge", "rebase", "pushremote", "description"},
     "user": {"name", "email"},
@@ -77,10 +132,17 @@ _GIT_PLAIN_KEYS = {
 }
 _GIT_SECTION = re.compile(r'^\[\s*([A-Za-z0-9.-]+)(?:\s+"[^"]*")?\s*\]\s*$')
 _GIT_KEY = re.compile(r"^([A-Za-z][A-Za-z0-9-]*)\s*(=|$)")
-RECURSIVE = {"grep": "rR", "egrep": "rR", "fgrep": "rR", "diff": "r"}  # short letters meaning "recurse"
+RECURSIVE = {
+    "grep": "rR",
+    "egrep": "rR",
+    "fgrep": "rR",
+    "diff": "r",
+}  # short letters meaning "recurse"
 NEVER_NAMES = re.compile(r"^(mkfs(\.\w+)?|shutdown|reboot|halt|poweroff|diskpart|format)$")
 NEVER_RAW = [
-    re.compile(r"(^|[;&|(\s])rm\s+(-\w*\s+)*-\w*[rR]\w*\s+(-\w*\s+)*(/|~|\$HOME|/\*|[A-Za-z]:[\\/]?)(\s|$)"),
+    re.compile(
+        r"(^|[;&|(\s])rm\s+(-\w*\s+)*-\w*[rR]\w*\s+(-\w*\s+)*(/|~|\$HOME|/\*|[A-Za-z]:[\\/]?)(\s|$)"
+    ),
     re.compile(r"(^|[;&|(\s])dd\s.*\bof=/dev/"),
     re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}"),  # fork bomb
 ]
@@ -92,7 +154,7 @@ _SECRET_FILE = re.compile(
     r"^(\.env(\.(?!example$|sample$|template$|dist$)[\w.-]+)?|.+\.env|\.envrc|\.netrc|_netrc|\.pgpass|\.npmrc|"
     r"\.pypirc|\.git-credentials|\.htpasswd|id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|credentials(\.json)?|"
     r".*\.(pem|key|p12|pfx|keystore|jks|ppk|kdbx))$",
-    re.I,
+    re.IGNORECASE,
 )
 # cmd.exe searches the current folder before PATH and gives these characters
 # meanings shlex does not model; only a plain `dir`/`echo` runs without asking.
@@ -120,7 +182,9 @@ def holds_credentials(path: Path) -> bool:
         return True
     if path.name == "config" and path.parent.name == ".git":
         try:
-            return bool(_URL_WITH_PASSWORD.search(path.read_text(encoding="utf-8", errors="replace")))
+            return bool(
+                _URL_WITH_PASSWORD.search(path.read_text(encoding="utf-8", errors="replace"))
+            )
         except OSError:
             return True
     return False
@@ -130,7 +194,7 @@ def is_network_path(token: str) -> bool:
     """`//host/share` or `\\\\host\\share`. On Windows, even resolving one opens an SMB
     connection to the host, which can hand it the user's NTLM hash, so such a
     path must be refused before anything touches it."""
-    return token.startswith(("//", "\\\\")) or token.startswith(("/\\", "\\/"))
+    return token.startswith(("//", "\\\\", "/\\", "\\/"))
 
 
 def workspace_exposure(workspace: Path) -> tuple[bool, bool]:
@@ -140,7 +204,11 @@ def workspace_exposure(workspace: Path) -> tuple[bool, bool]:
     out through the second. A tree too big to scan counts as both.
     """
     # The scan skips .git, but its config can hold a token in a remote URL.
-    secrets = holds_credentials(workspace / ".git" / "config") if (workspace / ".git" / "config").exists() else False
+    secrets = (
+        holds_credentials(workspace / ".git" / "config")
+        if (workspace / ".git" / "config").exists()
+        else False
+    )
     outward = False
     seen = 0
     for root, dirs, files in os.walk(workspace):
@@ -158,8 +226,11 @@ def workspace_exposure(workspace: Path) -> tuple[bool, bool]:
                     target = os.readlink(p)
                 except OSError:
                     target = ""
-                if is_network_path(target) or target.upper().startswith(("\\\\?\\UNC", "\\??\\UNC")) or \
-                        _outside_or_secret(str(p), workspace):
+                if (
+                    is_network_path(target)
+                    or target.upper().startswith(("\\\\?\\UNC", "\\??\\UNC"))
+                    or _outside_or_secret(str(p), workspace)
+                ):
                     outward = True
         if secrets and outward:
             break
@@ -218,8 +289,9 @@ def unsafe_target(token: str, workspace: Path | None) -> bool:
         try:
             matches = glob.glob(pattern, include_hidden=True)
         except TypeError:  # Python 3.10
-            matches = glob.glob(pattern) + [m for m in glob.glob(str(Path(pattern).parent / ".*"))
-                                            if Path(m).name != ".."]
+            matches = glob.glob(pattern) + [
+                m for m in glob.glob(str(Path(pattern).parent / ".*")) if Path(m).name != ".."
+            ]
         # A file the model named `-delete` or `--output=x` becomes an option once
         # the shell expands the glob: `find *` would then delete.
         if any(Path(m).name.startswith("-") for m in matches):
@@ -253,12 +325,21 @@ def _flag_matches(arg: str, flags: set[str]) -> bool:
     if key in flags:
         return True
     # GNU/git long options may be abbreviated to any unique prefix.
-    return key.startswith("--") and len(key) > 2 and any(f.startswith(key) for f in flags if f.startswith("--"))
+    return (
+        key.startswith("--")
+        and len(key) > 2
+        and any(f.startswith(key) for f in flags if f.startswith("--"))
+    )
 
 
 RECURSIVE_LONG = ("--recursive", "--dereference-recursive", "--directories")
 # Options that make a directory walker follow symlinks out of the tree.
-FOLLOW_LINKS = {"find": {"-L", "-H", "-follow"}, "ls": set("LH"), "dir": set("LH"), "du": set("LHD")}
+FOLLOW_LINKS = {
+    "find": {"-L", "-H", "-follow"},
+    "ls": set("LH"),
+    "dir": set("LH"),
+    "du": set("LHD"),
+}
 
 
 def _recursive(name: str, args: list[str]) -> bool:
@@ -275,7 +356,11 @@ def _recursive(name: str, args: list[str]) -> bool:
         letters += "d"
     for a in args:
         key = a.split("=", 1)[0]
-        if key.startswith("--") and len(key) >= 4 and any(opt.startswith(key) for opt in RECURSIVE_LONG):
+        if (
+            key.startswith("--")
+            and len(key) >= 4
+            and any(opt.startswith(key) for opt in RECURSIVE_LONG)
+        ):
             return True
         if a.startswith("-") and not a.startswith("--") and any(c in a[1:] for c in letters):
             return True
@@ -365,7 +450,11 @@ def repo_config_is_plain(workspace: Path) -> bool:
             section = header.group(1).lower()
             continue
         key = _GIT_KEY.match(line)
-        if not key or section is None or key.group(1).lower() not in _GIT_PLAIN_KEYS.get(section, set()):
+        if (
+            not key
+            or section is None
+            or key.group(1).lower() not in _GIT_PLAIN_KEYS.get(section, set())
+        ):
             return False  # unknown key, unknown section, or a line this parser cannot read
     return True
 
@@ -376,7 +465,7 @@ def _git_ok(args: list[str], workspace: Path | None) -> bool:
         i += 1
     if i >= len(args) or args[i] not in GIT_READ_ONLY:
         return False  # also rejects every global option: -C, -c, --namespace, --work-tree, ...
-    sub, rest = args[i], args[i + 1:]
+    sub, rest = args[i], args[i + 1 :]
     if any(":" in a for a in rest):
         return False  # pathspec magic (:/) and object paths (HEAD:../x) reach past the workspace
     if any(_flag_matches(a, UNSAFE_FLAGS["git"]) for a in rest):
@@ -393,17 +482,75 @@ def _git_ok(args: list[str], workspace: Path | None) -> bool:
 # then status -v, then a bare diff of a deleted .env), so this is an allowlist.
 # Long options must be spelled out: git accepts abbreviations, which only ask.
 _GIT_LOG_FLAGS = {
-    "--oneline", "--graph", "--all", "--branches", "--tags", "--decorate", "--no-decorate", "--reverse",
-    "--stat", "--shortstat", "--name-only", "--name-status", "--no-merges", "--merges", "--first-parent",
-    "--abbrev-commit", "--since", "--until", "--after", "--before", "--author", "--committer", "--grep",
-    "--max-count", "--skip", "--format", "--pretty", "--date", "--relative-date", "--topo-order",
-    "--date-order", "--no-color", "--left-right", "--follow", "--", "-n",
+    "--oneline",
+    "--graph",
+    "--all",
+    "--branches",
+    "--tags",
+    "--decorate",
+    "--no-decorate",
+    "--reverse",
+    "--stat",
+    "--shortstat",
+    "--name-only",
+    "--name-status",
+    "--no-merges",
+    "--merges",
+    "--first-parent",
+    "--abbrev-commit",
+    "--since",
+    "--until",
+    "--after",
+    "--before",
+    "--author",
+    "--committer",
+    "--grep",
+    "--max-count",
+    "--skip",
+    "--format",
+    "--pretty",
+    "--date",
+    "--relative-date",
+    "--topo-order",
+    "--date-order",
+    "--no-color",
+    "--left-right",
+    "--follow",
+    "--",
+    "-n",
 }
-_GIT_DIFF_NAMES = {"--stat", "--shortstat", "--numstat", "--name-only", "--name-status", "--summary", "--dirstat"}
-_GIT_DIFF_FLAGS = _GIT_DIFF_NAMES | {"--cached", "--staged", "--no-color", "--relative", "--no-renames", "--"}
-_GIT_STATUS_FLAGS = {"--short", "--branch", "--porcelain", "--long", "--untracked-files", "--ignored",
-                     "--no-renames", "--ahead-behind", "--no-ahead-behind", "--show-stash", "--column",
-                     "--no-column", "--"}
+_GIT_DIFF_NAMES = {
+    "--stat",
+    "--shortstat",
+    "--numstat",
+    "--name-only",
+    "--name-status",
+    "--summary",
+    "--dirstat",
+}
+_GIT_DIFF_FLAGS = _GIT_DIFF_NAMES | {
+    "--cached",
+    "--staged",
+    "--no-color",
+    "--relative",
+    "--no-renames",
+    "--",
+}
+_GIT_STATUS_FLAGS = {
+    "--short",
+    "--branch",
+    "--porcelain",
+    "--long",
+    "--untracked-files",
+    "--ignored",
+    "--no-renames",
+    "--ahead-behind",
+    "--no-ahead-behind",
+    "--show-stash",
+    "--column",
+    "--no-column",
+    "--",
+}
 _GIT_STATUS_SHORT = set("sbzu")
 _GIT_FREE = {"rev-parse", "ls-files"}  # they print names and hashes whatever their options
 
@@ -413,16 +560,21 @@ def _git_flags_ok(sub: str, rest: list[str]) -> bool:
         return True
     options = [a for a in rest if a.startswith("-")]
     if sub == "log":
-        return all(a.split("=", 1)[0] in _GIT_LOG_FLAGS or re.fullmatch(r"-n?\d+", a) for a in options)
+        return all(
+            a.split("=", 1)[0] in _GIT_LOG_FLAGS or re.fullmatch(r"-n?\d+", a) for a in options
+        )
     if sub == "diff":
         # Only the name and count forms: any patch, of the working tree too, can
         # print a deleted file's old contents.
-        return any(a.split("=", 1)[0] in _GIT_DIFF_NAMES for a in options) and \
-            all(a.split("=", 1)[0] in _GIT_DIFF_FLAGS for a in options)
+        return any(a.split("=", 1)[0] in _GIT_DIFF_NAMES for a in options) and all(
+            a.split("=", 1)[0] in _GIT_DIFF_FLAGS for a in options
+        )
     if sub == "status":  # -v prints the staged diff
-        return all(a.split("=", 1)[0] in _GIT_STATUS_FLAGS or
-                   (not a.startswith("--") and set(a[1:].split("=", 1)[0]) <= _GIT_STATUS_SHORT)
-                   for a in options)
+        return all(
+            a.split("=", 1)[0] in _GIT_STATUS_FLAGS
+            or (not a.startswith("--") and set(a[1:].split("=", 1)[0]) <= _GIT_STATUS_SHORT)
+            for a in options
+        )
     return False
 
 
@@ -456,7 +608,9 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
         target = tokens[i + 1] if i + 1 < len(tokens) else ""
         if tok in SEPARATORS:
             segments.append([])
-        elif tok in (">", ">>", "&>", ">&", "&>>") or (tok.endswith(">") and set(tok) <= set("<>&|")):
+        elif tok in (">", ">>", "&>", ">&", "&>>") or (
+            tok.endswith(">") and set(tok) <= set("<>&|")
+        ):
             if not (target == "/dev/null" or (tok == ">&" and target.isdigit())):
                 return ASK  # writes a file (`> -` creates one named "-")
             i += 1
@@ -485,15 +639,15 @@ def classify(command: str, workspace: Path | None = None, *, cmd_shell: bool = F
         if name == "git":
             if not _git_ok(args, workspace):
                 return ASK
-        elif name not in READ_ONLY:
-            return ASK
-        elif any(_flag_matches(a, UNSAFE_FLAGS.get(name, set())) for a in args):
+        elif name not in READ_ONLY or any(
+            _flag_matches(a, UNSAFE_FLAGS.get(name, set())) for a in args
+        ):
             return ASK
         # After `--`, every argument is an operand, however it starts: `cat -- --/../x`
         # reads ../x. Options are only what comes before it.
         if "--" in args:
             cut = args.index("--")
-            options, operands = args[:cut], args[cut + 1:]
+            options, operands = args[:cut], args[cut + 1 :]
         else:
             options, operands = args, []
         # `uniq IN OUT` overwrites OUT, and one glob can expand to both.

@@ -5,20 +5,40 @@ import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+from typing import ClassVar
 
 import pytest
 
 from harness.config import Config
-from harness.llm import (LLMError, OllamaBackend, OpenAIBackend, Reply, ScriptedLLM, ToolCall, call,
-                         extract_inline_tool_calls, http_post_json, make_llm)
+from harness.llm import (
+    LLMError,
+    OllamaBackend,
+    OpenAIBackend,
+    Reply,
+    ScriptedLLM,
+    ToolCall,
+    call,
+    extract_inline_tool_calls,
+    http_post_json,
+    make_llm,
+)
 
 TOOLS = [{"type": "function", "function": {"name": "bash", "description": "", "parameters": {}}}]
 
 HISTORY = [
     {"role": "system", "content": "sys"},
     {"role": "user", "content": "hi"},
-    {"role": "assistant", "content": "", "tool_calls": [
-        {"id": "c1", "type": "function", "function": {"name": "bash", "arguments": '{"command": "ls"}'}}]},
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": '{"command": "ls"}'},
+            }
+        ],
+    },
     {"role": "tool", "tool_call_id": "c1", "name": "bash", "content": "a.txt"},
 ]
 
@@ -72,13 +92,27 @@ def test_ollama_base_url_with_v1_suffix_still_hits_native_api(tmp_path):
 
 
 def test_ollama_reply_is_normalised(tmp_path):
-    post = FakePost({"message": {"content": "", "tool_calls": [
-        {"function": {"name": "bash", "arguments": {"command": "pwd"}}},
-        {"function": {"name": "bash", "arguments": {"command": "ls"}}}]},
-        "prompt_eval_count": 120, "eval_count": 9})
+    post = FakePost(
+        {
+            "message": {
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "bash", "arguments": {"command": "pwd"}}},
+                    {"function": {"name": "bash", "arguments": {"command": "ls"}}},
+                ],
+            },
+            "prompt_eval_count": 120,
+            "eval_count": 9,
+        }
+    )
     reply = OllamaBackend(cfg(tmp_path), post).chat(HISTORY, TOOLS)
-    assert [json.loads(c.arguments) for c in reply.tool_calls] == [{"command": "pwd"}, {"command": "ls"}]
-    assert len({c.id for c in reply.tool_calls}) == 2  # ids are unique even when the server sends none
+    assert [json.loads(c.arguments) for c in reply.tool_calls] == [
+        {"command": "pwd"},
+        {"command": "ls"},
+    ]
+    assert (
+        len({c.id for c in reply.tool_calls}) == 2
+    )  # ids are unique even when the server sends none
     assert reply.usage == {"prompt_tokens": 120, "completion_tokens": 9}
 
 
@@ -89,7 +123,9 @@ def test_ollama_error_field_raises(tmp_path):
 
 def test_openai_request_drops_harness_only_fields(tmp_path):
     post = FakePost({"choices": [{"message": {"content": "hi"}}]})
-    OpenAIBackend(cfg(tmp_path, backend="openai", base_url="https://x/api/v1", api_key="sk"), post).chat(HISTORY, TOOLS)
+    OpenAIBackend(
+        cfg(tmp_path, backend="openai", base_url="https://x/api/v1", api_key="sk"), post
+    ).chat(HISTORY, TOOLS)
     url, body, headers, _ = post.calls[0]
     assert url == "https://x/api/v1/chat/completions"
     assert headers == {"Authorization": "Bearer sk"}
@@ -99,9 +135,29 @@ def test_openai_request_drops_harness_only_fields(tmp_path):
 
 
 def test_openai_reply_with_cached_tokens(tmp_path):
-    post = FakePost({"choices": [{"message": {"content": None, "tool_calls": [
-        {"id": "x", "type": "function", "function": {"name": "bash", "arguments": '{"command": "ls"}'}}]}}],
-        "usage": {"prompt_tokens": 3624, "completion_tokens": 40, "prompt_tokens_details": {"cached_tokens": 3328}}})
+    post = FakePost(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "x",
+                                "type": "function",
+                                "function": {"name": "bash", "arguments": '{"command": "ls"}'},
+                            }
+                        ],
+                    }
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 3624,
+                "completion_tokens": 40,
+                "prompt_tokens_details": {"cached_tokens": 3328},
+            },
+        }
+    )
     reply = OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, TOOLS)
     assert reply.tool_calls[0].name == "bash"
     assert reply.content == ""
@@ -118,26 +174,35 @@ def test_make_llm_picks_backend(tmp_path):
     assert isinstance(make_llm(cfg(tmp_path, backend="openai")), OpenAIBackend)
 
 
-@pytest.mark.parametrize("content", [
-    '{"name": "bash", "arguments": {"command": "ls"}}',
-    '```json\n{"name": "bash", "arguments": {"command": "ls"}}\n```',
-    '<tool_call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</tool_call>',
-    '\n  <tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>\n',
-])
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"name": "bash", "arguments": {"command": "ls"}}',
+        '```json\n{"name": "bash", "arguments": {"command": "ls"}}\n```',
+        '<tool_call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</tool_call>',
+        '\n  <tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>\n',
+    ],
+)
 def test_inline_tool_calls_are_recovered(content):
     calls = extract_inline_tool_calls(content, {"bash"})
     assert [(c.name, json.loads(c.arguments)) for c in calls] == [("bash", {"command": "ls"})]
 
 
-@pytest.mark.parametrize("content", [
-    'Call it like this: {"name": "bash", "arguments": {"command": "ls"}}',  # prose around JSON
-    '{"name": "rm_everything", "arguments": {}}',  # not a known tool
-    '{"name": "bash", "arguments": "ls"}',  # arguments not an object
-    "{not json}",
-    # a tagged block quoted in prose is an example, not a call (it was once run)
-    'Never do this: <tool_call>{"name": "bash", "arguments": {"command": "rm -rf build"}}</tool_call> ok?',
-    'Sure.\n<tool_call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</tool_call>',
-])
+@pytest.mark.parametrize(
+    "content",
+    [
+        'Call it like this: {"name": "bash", "arguments": {"command": "ls"}}',  # prose around JSON
+        '{"name": "rm_everything", "arguments": {}}',  # not a known tool
+        '{"name": "bash", "arguments": "ls"}',  # arguments not an object
+        "{not json}",
+        # a tagged block quoted in prose is an example, not a call (it was once run)
+        (
+            'Never do this: <tool_call>{"name": "bash", "arguments": '
+            '{"command": "rm -rf build"}}</tool_call> ok?'
+        ),
+        'Sure.\n<tool_call>\n{"name": "bash", "arguments": {"command": "ls"}}\n</tool_call>',
+    ],
+)
 def test_prose_and_unknown_tools_are_not_calls(content):
     assert extract_inline_tool_calls(content, {"bash"}) == []
 
@@ -152,8 +217,13 @@ def test_backend_uses_inline_fallback_only_when_tools_were_offered(tmp_path):
 
 def test_reply_to_message():
     msg = Reply("x", [ToolCall("id1", "bash", "{}")]).to_message()
-    assert msg == {"role": "assistant", "content": "x", "tool_calls": [
-        {"id": "id1", "type": "function", "function": {"name": "bash", "arguments": "{}"}}]}
+    assert msg == {
+        "role": "assistant",
+        "content": "x",
+        "tool_calls": [
+            {"id": "id1", "type": "function", "function": {"name": "bash", "arguments": "{}"}}
+        ],
+    }
     assert Reply("y").to_message() == {"role": "assistant", "content": "y"}
 
 
@@ -175,7 +245,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"error": "model \\"missing\\" not found"}')
             return
-        payload = json.dumps({"message": {"content": f"echo {body['messages'][-1]['content']}"}}).encode()
+        payload = json.dumps(
+            {"message": {"content": f"echo {body['messages'][-1]['content']}"}}
+        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -201,7 +273,9 @@ def test_real_http_round_trip_against_a_local_stub(tmp_path, local_server):
 
 def test_http_errors_carry_the_server_message(tmp_path, local_server):
     with pytest.raises(LLMError, match="HTTP 404.*not found"):
-        OllamaBackend(cfg(tmp_path, base_url=local_server, model="missing")).chat([{"role": "user", "content": "x"}], None)
+        OllamaBackend(cfg(tmp_path, base_url=local_server, model="missing")).chat(
+            [{"role": "user", "content": "x"}], None
+        )
 
 
 class _TrickleHandler(BaseHTTPRequestHandler):
@@ -277,15 +351,22 @@ def test_a_slow_error_body_is_cut_at_the_deadline():
 
 
 def test_retry_after_lengthens_the_wait_up_to_a_cap(tmp_path):
-    post = FlakyPost([LLMError("429", retryable=True, retry_after=20), LLMError("429", retryable=True, retry_after=500)],
-                     {"message": {"content": "ok"}})
+    post = FlakyPost(
+        [
+            LLMError("429", retryable=True, retry_after=20),
+            LLMError("429", retryable=True, retry_after=500),
+        ],
+        {"message": {"content": "ok"}},
+    )
     waits = []
     OllamaBackend(cfg(tmp_path), post, sleep=waits.append).chat(HISTORY, None)
     assert waits == [20, 60]  # the server's 20 s honoured; 500 s capped at a minute
 
 
 def test_inline_call_with_arguments_as_json_text():
-    calls = extract_inline_tool_calls('{"name": "bash", "arguments": "{\\"command\\": \\"ls\\"}"}', {"bash"})
+    calls = extract_inline_tool_calls(
+        '{"name": "bash", "arguments": "{\\"command\\": \\"ls\\"}"}', {"bash"}
+    )
     assert [(c.name, json.loads(c.arguments)) for c in calls] == [("bash", {"command": "ls"})]
 
 
@@ -314,14 +395,17 @@ class FakeResponse:
 class FakeConnection:
     """Stands in for http.client: raises `error` on request, or returns `response`."""
 
-    def __init__(self, error=None, response=None):
+    def __init__(self, error=None, response=None, response_error=None):
         self.error, self.response, self.sock = error, response, None
+        self.response_error = response_error
 
     def request(self, *args, **kwargs):
         if self.error:
             raise self.error
 
     def getresponse(self):
+        if self.response_error:
+            raise self.response_error
         return self.response
 
     def close(self):
@@ -329,21 +413,58 @@ class FakeConnection:
 
 
 def fake_connection(monkeypatch, **kwargs):
-    monkeypatch.setattr("harness.llm._connection", lambda url, timeout: (FakeConnection(**kwargs), "/api/chat"))
+    monkeypatch.setattr(
+        "harness.llm._connection", lambda url, timeout: (FakeConnection(**kwargs), "/api/chat")
+    )
 
 
-@pytest.mark.parametrize("error, retryable", [
-    (ConnectionResetError(10054, "reset"), True),
-    (http.client.RemoteDisconnected("gone"), True),
-    (http.client.IncompleteRead(b"par"), True),
-    (TimeoutError("read timed out"), False),
-    (ConnectionRefusedError(10061, "refused"), False),
-])
+@pytest.mark.parametrize(
+    "error, retryable",
+    [
+        (ConnectionResetError(10054, "reset"), True),
+        (http.client.RemoteDisconnected("gone"), True),
+        (http.client.IncompleteRead(b"par"), True),
+        (TimeoutError("read timed out"), False),
+        (ConnectionRefusedError(10061, "refused"), False),
+    ],
+)
 def test_network_failures_never_escape_as_raw_exceptions(monkeypatch, error, retryable):
     fake_connection(monkeypatch, error=error)
     with pytest.raises(LLMError) as err:
         http_post_json("http://x/api/chat", {}, {}, 1)
     assert err.value.retryable is retryable
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionResetError(10054, "reset"),
+        http.client.RemoteDisconnected("gone"),
+        http.client.IncompleteRead(b"par"),
+    ],
+)
+def test_a_connection_lost_after_the_request_was_sent_is_not_retried(monkeypatch, error):
+    # The server had the whole request and may be generating (and billing) the
+    # reply; a retry could pay for it twice.
+    fake_connection(monkeypatch, response_error=error)
+    with pytest.raises(LLMError, match="after the request was sent") as err:
+        http_post_json("http://x/api/chat", {}, {}, 1)
+    assert err.value.retryable is False
+
+
+def test_the_backend_sends_once_when_the_reply_is_lost(tmp_path, monkeypatch):
+    calls = []
+
+    def conn(url, timeout):
+        calls.append(url)
+        return FakeConnection(response_error=http.client.RemoteDisconnected("gone")), "/api/chat"
+
+    monkeypatch.setattr("harness.llm._connection", conn)
+    llm = make_llm(Config(workspace=tmp_path, retries=3))
+    llm.sleep = lambda s: None
+    with pytest.raises(LLMError):
+        llm.chat([{"role": "user", "content": "hi"}], None)
+    assert len(calls) == 1
 
 
 def test_non_json_body_is_an_llm_error(monkeypatch):
@@ -360,6 +481,7 @@ def test_an_integer_past_pythons_digit_limit_is_an_llm_error(monkeypatch):
 
 def test_a_proxy_without_a_port_gets_its_own_schemes_default(monkeypatch):
     from harness.llm import _connection
+
     monkeypatch.setattr(urllib.request, "getproxies", lambda: {"https": "http://proxy.example"})
     monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
     conn, target = _connection("https://openrouter.ai/api/v1/chat/completions", 5)
@@ -367,11 +489,18 @@ def test_a_proxy_without_a_port_gets_its_own_schemes_default(monkeypatch):
     assert type(conn) is http.client.HTTPConnection and target == "/api/v1/chat/completions"
 
 
-@pytest.mark.parametrize("url", ["http://localhost:11434/api/chat", "http://127.0.0.1:11434/api/chat",
-                                 "http://[::1]:11434/api/chat"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:11434/api/chat",
+        "http://127.0.0.1:11434/api/chat",
+        "http://[::1]:11434/api/chat",
+    ],
+)
 def test_the_local_model_is_never_reached_through_a_proxy(monkeypatch, url):
     # A proxy from the environment would otherwise receive every prompt.
     from harness.llm import _connection
+
     monkeypatch.setattr(urllib.request, "getproxies", lambda: {"http": "http://proxy.example:3128"})
     monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
     conn, target = _connection(url, 5)
@@ -385,14 +514,17 @@ def test_deeply_nested_json_is_an_llm_error_not_a_recursion_crash(monkeypatch):
 
 
 def test_redirects_are_refused_so_the_key_never_travels(monkeypatch):
-    fake_connection(monkeypatch, response=FakeResponse(b"", status=302, headers={"Location": "http://evil.example/"}))
+    fake_connection(
+        monkeypatch,
+        response=FakeResponse(b"", status=302, headers={"Location": "http://evil.example/"}),
+    )
     with pytest.raises(LLMError, match="redirect to 'http://evil.example/' not followed") as err:
         http_post_json("http://x/api/chat", {}, {"Authorization": "Bearer sk-secret"}, 1)
     assert not err.value.retryable
 
 
 class _RedirectHandler(BaseHTTPRequestHandler):
-    seen: list = []
+    seen: ClassVar[list] = []
 
     def do_POST(self):
         self.rfile.read(int(self.headers["Content-Length"]))
@@ -416,7 +548,12 @@ def test_a_real_redirect_never_reaches_the_second_address():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         with pytest.raises(LLMError, match="HTTP 302"):
-            http_post_json(f"http://127.0.0.1:{server.server_port}/api/chat", {}, {"Authorization": "Bearer sk"}, 5)
+            http_post_json(
+                f"http://127.0.0.1:{server.server_port}/api/chat",
+                {},
+                {"Authorization": "Bearer sk"},
+                5,
+            )
     finally:
         server.shutdown()
     assert _RedirectHandler.seen == []
@@ -453,10 +590,13 @@ def test_the_deadline_also_covers_a_trickled_status_line_and_headers():
 
 
 @pytest.mark.parametrize("backend", [OllamaBackend, OpenAIBackend])
-@pytest.mark.parametrize("message", [
-    {"content": 123, "tool_calls": [{"function": {"name": "bash", "arguments": {}}}]},
-    {"content": "", "tool_calls": [{"function": {"name": ["bash"], "arguments": {}}}]},
-])
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"content": 123, "tool_calls": [{"function": {"name": "bash", "arguments": {}}}]},
+        {"content": "", "tool_calls": [{"function": {"name": ["bash"], "arguments": {}}}]},
+    ],
+)
 def test_wrong_typed_fields_are_an_llm_error(tmp_path, backend, message):
     kind = "openai" if backend is OpenAIBackend else "ollama"
     body = {"message": message, "choices": [{"message": message}]}
@@ -478,8 +618,10 @@ class FlakyPost:
 
 
 def test_transient_failures_are_retried_with_backoff(tmp_path):
-    post = FlakyPost([LLMError("503", retryable=True), LLMError("reset", retryable=True)],
-                     {"message": {"content": "finally"}})
+    post = FlakyPost(
+        [LLMError("503", retryable=True), LLMError("reset", retryable=True)],
+        {"message": {"content": "finally"}},
+    )
     waits = []
     backend = OllamaBackend(cfg(tmp_path), post, sleep=waits.append)
     assert backend.chat(HISTORY, None).content == "finally"
@@ -499,29 +641,45 @@ def test_retries_give_up_and_permanent_errors_fail_at_once(tmp_path):
 
 def test_http_status_decides_retryability(tmp_path, local_server):
     with pytest.raises(LLMError) as err:
-        OllamaBackend(cfg(tmp_path, base_url=local_server, model="missing"), sleep=lambda s: None).chat(
-            [{"role": "user", "content": "x"}], None)
+        OllamaBackend(
+            cfg(tmp_path, base_url=local_server, model="missing"), sleep=lambda s: None
+        ).chat([{"role": "user", "content": "x"}], None)
     assert err.value.retryable is False  # 404: asking again will not help
 
 
 def test_truncated_replies_are_flagged(tmp_path):
-    ollama = OllamaBackend(cfg(tmp_path), FakePost({"message": {"content": "half"}, "done_reason": "length"}))
+    ollama = OllamaBackend(
+        cfg(tmp_path), FakePost({"message": {"content": "half"}, "done_reason": "length"})
+    )
     assert ollama.chat(HISTORY, None).truncated is True
-    openai = OpenAIBackend(cfg(tmp_path, backend="openai"),
-                           FakePost({"choices": [{"message": {"content": "half"}, "finish_reason": "length"}]}))
+    openai = OpenAIBackend(
+        cfg(tmp_path, backend="openai"),
+        FakePost({"choices": [{"message": {"content": "half"}, "finish_reason": "length"}]}),
+    )
     assert openai.chat(HISTORY, None).truncated is True
-    done = OllamaBackend(cfg(tmp_path), FakePost({"message": {"content": "all"}, "done_reason": "stop"}))
+    done = OllamaBackend(
+        cfg(tmp_path), FakePost({"message": {"content": "all"}, "done_reason": "stop"})
+    )
     assert done.chat(HISTORY, None).truncated is False
 
 
 @pytest.mark.parametrize("backend", [OllamaBackend, OpenAIBackend])
-@pytest.mark.parametrize("body", [
-    [], "text", 42, None,
-    {"message": None, "choices": [{"message": None}]},
-    {"message": {"tool_calls": ["x"]}, "choices": [{"message": {"tool_calls": ["x"]}}]},
-    {"message": {"tool_calls": [{"function": "bash"}]}, "choices": [{"message": {"tool_calls": [{"function": "bash"}]}}]},
-    {"choices": "none"},
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        [],
+        "text",
+        42,
+        None,
+        {"message": None, "choices": [{"message": None}]},
+        {"message": {"tool_calls": ["x"]}, "choices": [{"message": {"tool_calls": ["x"]}}]},
+        {
+            "message": {"tool_calls": [{"function": "bash"}]},
+            "choices": [{"message": {"tool_calls": [{"function": "bash"}]}}],
+        },
+        {"choices": "none"},
+    ],
+)
 def test_wrong_shaped_json_is_an_llm_error(tmp_path, backend, body):
     kind = "openai" if backend is OpenAIBackend else "ollama"
     with pytest.raises(LLMError):
@@ -531,9 +689,22 @@ def test_wrong_shaped_json_is_an_llm_error(tmp_path, backend, body):
 @pytest.mark.parametrize("usage", [["x"], "lots", {"prompt_tokens_details": "n/a"}, None])
 def test_a_malformed_usage_field_does_not_throw_away_a_good_answer(tmp_path, usage):
     post = FakePost({"choices": [{"message": {"content": "the answer"}}], "usage": usage})
-    assert OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, None).content == "the answer"
+    assert (
+        OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, None).content
+        == "the answer"
+    )
 
 
 def test_openai_content_as_typed_parts(tmp_path):
-    post = FakePost({"choices": [{"message": {"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}}]})
+    post = FakePost(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+                    }
+                }
+            ]
+        }
+    )
     assert OpenAIBackend(cfg(tmp_path, backend="openai"), post).chat(HISTORY, None).content == "ab"

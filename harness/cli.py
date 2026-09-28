@@ -14,9 +14,33 @@ from .sandbox import SandboxUnavailable
 from .tools import printable
 
 RESULT_PREVIEW = 400
+
+EPILOG = """\
+settings, strongest first: these flags, HARNESS_* environment variables,
+~/.config/harness/.env (or the file HARNESS_CONFIG names), then the workspace's
+own .env, which may set only HARNESS_TEMPERATURE, HARNESS_COMPACT_AT and
+HARNESS_COMPACT_TO. See .env.example for every setting.
+
+examples:
+  harness                                   a session in the current folder
+  harness -p "add a --verbose flag" -w app  one task in ./app, then exit
+  harness --num-ctx 4096 --max-steps 20     a smaller context and step budget
+"""
+
+
 def _screen_safe(text: str) -> str:
     """Escape every control character except newlines and tabs."""
-    return "\n".join("\t".join(printable(cell) for cell in line.split("\t")) for line in text.split("\n"))
+    return "\n".join(
+        "\t".join(printable(cell) for cell in line.split("\t")) for line in text.split("\n")
+    )
+
+
+def _plain(code: str, s: str) -> str:
+    return s
+
+
+def _ansi(code: str, s: str) -> str:
+    return f"\033[{code}m{s}\033[0m"
 
 
 class Printer:
@@ -25,36 +49,43 @@ class Printer:
         color = stream.isatty() and "NO_COLOR" not in os.environ
         if color and os.name == "nt":
             os.system("")  # turns on ANSI escape handling in the Windows console
-        self.c = (lambda code, s: f"\033[{code}m{s}\033[0m") if color else (lambda code, s: s)
+        self.paint = _ansi if color else _plain
 
-    def __call__(self, kind: str, data) -> None:
+    def _show(self, code: str, text: str) -> None:
         # Model text and file contents may hold escape sequences or \r that would
         # erase or rewrite lines on screen, hiding what happened before a prompt.
         # Cleaned before our own colour codes go around it.
-        c = lambda code, s: self.c(code, _screen_safe(s))
-        p = lambda s: print(s, file=self.out, flush=True)
+        print(self.paint(code, _screen_safe(text)), file=self.out, flush=True)
+
+    def __call__(self, kind: str, data) -> None:
         if kind == "assistant_text":
-            p(_screen_safe(data))
+            print(_screen_safe(data), file=self.out, flush=True)
         elif kind == "tool_call":
-            p(c("36", f"> {data.name} {data.arguments}"))
+            self._show("36", f"> {data.name} {data.arguments}")
         elif kind == "subagent_tool_call":
-            p(c("36", f"  [subagent] > {data.name} {data.arguments}"))
+            self._show("36", f"  [subagent] > {data.name} {data.arguments}")
         elif kind == "tool_result":
             _, result = data
-            shown = result if len(result) <= RESULT_PREVIEW else result[:RESULT_PREVIEW] + f" ... ({len(result)} chars)"
-            p(c("2", "  " + shown.replace("\n", "\n  ")))
+            shown = result
+            if len(result) > RESULT_PREVIEW:
+                shown = f"{result[:RESULT_PREVIEW]} ... ({len(result)} chars)"
+            self._show("2", "  " + shown.replace("\n", "\n  "))
         elif kind == "usage" and data:
             cached = f", {data['cached_tokens']} cached" if data.get("cached_tokens") else ""
-            p(c("2", f"  [{data.get('prompt_tokens', 0)} prompt tokens{cached}, {data.get('completion_tokens', 0)} out]"))
+            prompt, out = data.get("prompt_tokens", 0), data.get("completion_tokens", 0)
+            self._show("2", f"  [{prompt} prompt tokens{cached}, {out} out]")
         elif kind == "subagent_start":
-            p(c("35", "  [subagent started]"))
+            self._show("35", "  [subagent started]")
         elif kind == "subagent_end":
-            p(c("35", "  [subagent finished]"))
+            self._show("35", "  [subagent finished]")
         elif kind == "compacted":
             before, after = data
-            p(c("33", f"  [compacted the transcript: ~{before} -> ~{after} tokens]"))
+            self._show("33", f"  [compacted the transcript: ~{before} -> ~{after} tokens]")
         elif kind == "squeezed":
-            p(c("33", f"  [cut this turn's tool outputs to fit: ~{data[0]} tokens, budget {data[1]}]"))
+            tokens, budget = data
+            self._show(
+                "33", f"  [cut this turn's tool outputs to fit: ~{tokens} tokens, budget {budget}]"
+            )
 
 
 def ask_user(question: str) -> bool:
@@ -67,29 +98,89 @@ def ask_user(question: str) -> bool:
         return False
 
 
+def _positive(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a whole number: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(prog="harness", description="A minimal coding agent.")
-    ap.add_argument("-p", "--prompt", help="run one task and exit")
-    ap.add_argument("-w", "--workspace", default=".", help="folder the agent works in (default: current)")
-    ap.add_argument("--backend", choices=["ollama", "openai"])
-    ap.add_argument("--model")
-    ap.add_argument("--base-url")
-    ap.add_argument("--sandbox", choices=["auto", "none", "required"])
+    ap = argparse.ArgumentParser(
+        prog="harness",
+        description="A minimal coding agent: a model called in a loop, with tools, "
+        "permissions and compaction. With no -p it opens an interactive session.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("-p", "--prompt", metavar="TASK", help="run one task, print the answer, exit")
+    ap.add_argument(
+        "-w",
+        "--workspace",
+        default=".",
+        metavar="DIR",
+        help="existing folder the agent works in (default: the current one)",
+    )
+    ap.add_argument(
+        "--backend",
+        choices=["ollama", "openai"],
+        help="ollama: native /api/chat (default); openai: any /chat/completions API",
+    )
+    ap.add_argument("--model", help="model name (default: qwen2.5:7b-instruct, or HARNESS_MODEL)")
+    ap.add_argument(
+        "--base-url",
+        metavar="URL",
+        help="server address (default: http://localhost:11434 for ollama, "
+        "https://openrouter.ai/api/v1 for openai)",
+    )
+    ap.add_argument(
+        "--sandbox",
+        choices=["auto", "none", "required"],
+        help="auto: bubblewrap/Seatbelt when present (default); none: never; "
+        "required: refuse to start without one",
+    )
+    ap.add_argument(
+        "--num-ctx",
+        type=_positive,
+        metavar="TOKENS",
+        help="Ollama's context window, also where compaction aims (default 8192)",
+    )
+    ap.add_argument(
+        "--max-steps",
+        type=_positive,
+        metavar="N",
+        help="model calls allowed per task before stopping (default 40)",
+    )
     return ap.parse_args(argv)
 
 
-def build_config(args: argparse.Namespace, env: dict, warn=lambda msg: print(msg, file=sys.stderr)) -> Config:
+def build_config(
+    args: argparse.Namespace, env: dict, warn=lambda msg: print(msg, file=sys.stderr)
+) -> Config:
     """Settings, strongest first: command-line flags, the real environment, the
     user's own config file, then the workspace .env, which may set only
-    PROJECT_SETTINGS (harmless tuning)."""
-    workspace = Path(args.workspace).resolve()
+    PROJECT_SETTINGS (harmless tuning). A workspace that is not an existing
+    folder is an error here, before any model is contacted."""
+    workspace = Path(args.workspace).expanduser().resolve()
+    if not workspace.exists():
+        raise ValueError(f"workspace {workspace} does not exist")
+    if not workspace.is_dir():
+        raise ValueError(f"workspace {workspace} is not a folder")
     load_dotenv(user_config_file(env), env)
     ignored = load_dotenv(workspace / ".env", env, only=PROJECT_SETTINGS)
     if ignored:
-        warn(f"warning: ignored {', '.join(ignored)} from {workspace / '.env'}; a project's .env may set only "
-             f"{', '.join(sorted(PROJECT_SETTINGS))}. Put the rest in {user_config_file(env)} or the environment.")
-    if args.backend:
-        env["HARNESS_BACKEND"] = args.backend
+        warn(
+            f"warning: ignored {', '.join(ignored)} from {workspace / '.env'}; a project's .env "
+            f"may set only {', '.join(sorted(PROJECT_SETTINGS))}. Put the rest in "
+            f"{user_config_file(env)} or the environment."
+        )
+    # Flags that decide validated sizes go in before the settings are built.
+    for flag, key in (("backend", "BACKEND"), ("num_ctx", "NUM_CTX"), ("max_steps", "MAX_STEPS")):
+        if getattr(args, flag, None) is not None:
+            env[f"HARNESS_{key}"] = str(getattr(args, flag))
     cfg = Config.from_env(workspace, env)
     cfg.model = args.model or cfg.model
     cfg.base_url = args.base_url or cfg.base_url
@@ -104,6 +195,9 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
+    if args.prompt is not None and not args.prompt.strip():
+        print("error: -p needs a task; leave -p out for an interactive session", file=sys.stderr)
+        return 2
     try:
         cfg = build_config(args, dict(os.environ))
         printer = Printer()
@@ -116,9 +210,10 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.backend == "ollama":
         where += f" (num_gpu={cfg.num_gpu}, num_ctx={cfg.num_ctx}, threads={cfg.num_thread})"
     print(f"harness | model {cfg.model} via {where}")
-    print(f"workspace {cfg.workspace} | sandbox {agent.sandbox.describe()} | {len(agent.skills)} skills")
+    skills = len(agent.skills)
+    print(f"workspace {cfg.workspace} | sandbox {agent.sandbox.describe()} | {skills} skills")
 
-    if args.prompt:
+    if args.prompt is not None:
         try:
             print(_screen_safe(agent.send(args.prompt)))
         except LLMError as e:

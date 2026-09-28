@@ -54,10 +54,24 @@ def git_summary(workspace: Path) -> str | None:
         try:
             # git prints UTF-8; the locale codec (cp1252 here) failed on an emoji
             # in a commit subject and took the whole session down with it.
-            out = subprocess.run([git_exe, f"--git-dir={git_dir}", "-c", "core.fsmonitor=false",
-                                  "-c", "log.showSignature=false", *args],
-                                 cwd=workspace, capture_output=True, encoding="utf-8",
-                                 errors="replace", timeout=5, stdin=subprocess.DEVNULL)
+            out = subprocess.run(
+                [
+                    git_exe,
+                    f"--git-dir={git_dir}",
+                    "-c",
+                    "core.fsmonitor=false",
+                    "-c",
+                    "log.showSignature=false",
+                    *args,
+                ],
+                cwd=workspace,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                stdin=subprocess.DEVNULL,
+                check=False,  # a failing git (no commits yet, say) is read from returncode
+            )
         except (OSError, subprocess.TimeoutExpired):
             return None
         return (out.stdout or "").strip() if out.returncode == 0 else None
@@ -93,18 +107,28 @@ def stale_files(seen: dict[Path, tuple[int, int]]) -> list[Path]:
     return stale
 
 
-def build_reminder(*, workspace: Path, todos: TodoList, seen: dict[Path, tuple[int, int]],
-                   today: date, git: str | None) -> str:
-    lines = ["<system-reminder>",
-             "Context from the harness, not a message from the user.",
-             f"Today: {today.isoformat()}"]
+def build_reminder(
+    *,
+    workspace: Path,
+    todos: TodoList,
+    seen: dict[Path, tuple[int, int]],
+    today: date,
+    git: str | None,
+) -> str:
+    lines = [
+        "<system-reminder>",
+        "Context from the harness, not a message from the user.",
+        f"Today: {today.isoformat()}",
+    ]
     if git:
         lines.append(f"Git: {git}")
     if todos.items:
         lines += ["Todo list:", todos.render_open()]
     stale = stale_files(seen)
     if stale:
-        lines.append("These files changed on disk since you last read them; read them again before editing:")
+        lines.append(
+            "These files changed on disk since you last read them; read them again before editing:"
+        )
         for p in stale[:MAX_STALE_SHOWN]:
             try:
                 shown = p.relative_to(workspace)

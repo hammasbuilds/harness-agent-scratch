@@ -45,7 +45,9 @@ class TodoList:
             if not content:
                 raise TodoError(f"item {n} has no content")
             if len(content) > MAX_ITEM_CHARS:
-                raise TodoError(f"item {n} is {len(content)} characters; keep each under {MAX_ITEM_CHARS}")
+                raise TodoError(
+                    f"item {n} is {len(content)} characters; keep each under {MAX_ITEM_CHARS}"
+                )
             if status not in STATUSES:
                 raise TodoError(f"item {n} has status {status!r}; use one of {', '.join(STATUSES)}")
             items.append(Todo(content, status))

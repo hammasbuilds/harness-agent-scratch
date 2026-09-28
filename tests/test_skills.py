@@ -11,13 +11,20 @@ def make_skill(base: Path, folder: str, text: str, filename: str = "SKILL.md") -
 
 
 def test_front_matter_flat_and_quoted():
-    meta = parse_front_matter('---\nname: copywriting\ndescription: "Write sharp copy."\nlicense: MIT\n---\nbody')
+    meta = parse_front_matter(
+        '---\nname: copywriting\ndescription: "Write sharp copy."\nlicense: MIT\n---\nbody'
+    )
     assert meta == {"name": "copywriting", "description": "Write sharp copy.", "license": "MIT"}
 
 
 def test_front_matter_folded_block():
-    text = "---\nname: frontend\ndescription: >\n  Build distinctive\n  production-grade interfaces.\n---\n"
-    assert parse_front_matter(text)["description"] == "Build distinctive production-grade interfaces."
+    text = (
+        "---\nname: frontend\ndescription: >\n  Build distinctive\n"
+        "  production-grade interfaces.\n---\n"
+    )
+    assert (
+        parse_front_matter(text)["description"] == "Build distinctive production-grade interfaces."
+    )
 
 
 def test_front_matter_ignores_nested_yaml():
@@ -63,7 +70,11 @@ def test_prompt_lists_name_and_description_only(tmp_path):
 def test_a_wordy_skill_cannot_swell_the_system_prompt(tmp_path):
     make_skill(tmp_path, "w", "---\nname: wordy\ndescription: " + "blah " * 5000 + "\n---\n")
     for i in range(60):
-        make_skill(tmp_path, f"s{i:02d}", f"---\nname: skill{i:02d}\ndescription: {'does things ' * 20}\n---\n")
+        make_skill(
+            tmp_path,
+            f"s{i:02d}",
+            f"---\nname: skill{i:02d}\ndescription: {'does things ' * 20}\n---\n",
+        )
     prompt = skills_prompt(discover_skills([tmp_path]))
     assert len(prompt) <= 4200 and "more skills not listed" in prompt
     assert "- skill00: does things" in prompt and "..." in prompt
@@ -71,4 +82,6 @@ def test_a_wordy_skill_cannot_swell_the_system_prompt(tmp_path):
 
 def test_default_dirs(tmp_path):
     assert default_skill_dirs(tmp_path / "ws", home=tmp_path / "h") == [
-        tmp_path / "h" / ".agents" / "skills", tmp_path / "ws" / ".agents" / "skills"]
+        tmp_path / "h" / ".agents" / "skills",
+        tmp_path / "ws" / ".agents" / "skills",
+    ]

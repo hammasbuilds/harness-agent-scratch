@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from itertools import pairwise
 
 from .llm import LLM
 
@@ -30,8 +31,14 @@ SAFETY = 1.15
 
 _VOWELS = frozenset("aeiouAEIOU")
 # Scripts the tokenizer has large vocabularies for: about one token a character.
-_CJK_RANGES = ((0x3000, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF), (0xF900, 0xFAFF),
-               (0xFF00, 0xFFEF))
+_CJK_RANGES = (
+    (0x3000, 0x30FF),
+    (0x3400, 0x4DBF),
+    (0x4E00, 0x9FFF),
+    (0xAC00, 0xD7AF),
+    (0xF900, 0xFAFF),
+    (0xFF00, 0xFFEF),
+)
 
 
 def _is_cjk(c: str) -> bool:
@@ -47,9 +54,14 @@ def _letter_tokens(run: str) -> int:
     about 19% against 35-40% for real words. Runs over 24 letters are rarely words.
     """
     n = len(run)
-    switches = sum(1 for a, b in zip(run, run[1:]) if a.isupper() != b.isupper())
+    switches = sum(1 for a, b in pairwise(run) if a.isupper() != b.isupper())
     vowels = sum(c in _VOWELS for c in run) / n
-    if (n >= 4 and switches * 3 >= n) or (n >= 6 and vowels < 0.28) or (3 <= n < 6 and vowels < 0.2) or n > 24:
+    if (
+        (n >= 4 and switches * 3 >= n)
+        or (n >= 6 and vowels < 0.28)
+        or (3 <= n < 6 and vowels < 0.2)
+        or n > 24
+    ):
         return math.ceil(n / 1.5)
     return math.ceil(n / 4)
 
@@ -79,7 +91,9 @@ def text_tokens(text: str) -> int:
         elif ord(c) > 0xFFFF:
             n += 3  # emoji and other astral characters take several byte tokens
         elif 0x2000 <= ord(c) <= 0x2BFF:
-            n += 3  # symbols (arrows, math, box drawing, Braille spinners): one token per UTF-8 byte
+            n += (
+                3  # symbols (arrows, math, box drawing, Braille spinners): one token per UTF-8 byte
+            )
         elif ord(c) > 0x7FF and not _is_cjk(c):
             n += 2  # other three-byte scripts, rarely merged: Ethiopic, Devanagari, Georgian
         else:
@@ -124,8 +138,12 @@ def render_for_summary(messages: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def fit_tokens(text: str, max_tokens: int, head_share: float = 0.25,
-               marker: str = "\n\n[... middle omitted ...]\n\n") -> str:
+def fit_tokens(
+    text: str,
+    max_tokens: int,
+    head_share: float = 0.25,
+    marker: str = "\n\n[... middle omitted ...]\n\n",
+) -> str:
     """Cut `text` to about `max_tokens`, keeping its start and its end.
 
     Measured in tokens, not characters: a character cap sized for English let a
@@ -137,17 +155,24 @@ def fit_tokens(text: str, max_tokens: int, head_share: float = 0.25,
     while lo < hi:
         mid = (lo + hi + 1) // 2
         head = int(mid * head_share)
-        candidate = text[:head] + marker + text[len(text) - (mid - head):]
+        candidate = text[:head] + marker + text[len(text) - (mid - head) :]
         if text_tokens(candidate) <= max_tokens:
             lo = mid
         else:
             hi = mid - 1
     head = int(lo * head_share)
-    return text[:head] + marker + text[len(text) - (lo - head):] if lo else marker.strip()
+    return text[:head] + marker + text[len(text) - (lo - head) :] if lo else marker.strip()
 
 
-def compact(messages: list[dict], previous_summary: str, llm: LLM, *, keep_tokens: int,
-            budget_tokens: int, max_summary_tokens: int = 1000) -> tuple[str, list[dict]]:
+def compact(
+    messages: list[dict],
+    previous_summary: str,
+    llm: LLM,
+    *,
+    keep_tokens: int,
+    budget_tokens: int,
+    max_summary_tokens: int = 1000,
+) -> tuple[str, list[dict]]:
     """Return (new handoff note, messages to keep).
 
     The note is capped: it sits in every later request, and each compaction
@@ -161,12 +186,23 @@ def compact(messages: list[dict], previous_summary: str, llm: LLM, *, keep_token
     # Keep the opening (the goal) and the most recent work; drop the middle.
     body = fit_tokens(render_for_summary(messages[:cut]), budget_tokens)
     if previous_summary:
-        body = f"Handoff note from an earlier compaction:\n{previous_summary}\n\nTranscript since then:\n{body}"
+        body = (
+            f"Handoff note from an earlier compaction:\n{previous_summary}\n\n"
+            f"Transcript since then:\n{body}"
+        )
     words = max(50, int(max_summary_tokens * 0.6))
     system = f"{COMPACT_SYSTEM}\nKeep the note under {words} words."
-    note = llm.chat([{"role": "system", "content": system}, {"role": "user", "content": body}], None).content.strip()
+    note = llm.chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": body}], None
+    ).content.strip()
     if not note:  # an empty summary would silently lose everything that was cut
-        note = previous_summary + ("\n\n" if previous_summary else "") + f"[summary failed; earlier transcript excerpt]\n{body}"
+        note = (
+            previous_summary
+            + ("\n\n" if previous_summary else "")
+            + f"[summary failed; earlier transcript excerpt]\n{body}"
+        )
     if text_tokens(note) > max_summary_tokens:
-        note = fit_tokens(note, max_summary_tokens - 12, head_share=1.0, marker="\n[note cut to fit the context]")
+        note = fit_tokens(
+            note, max_summary_tokens - 12, head_share=1.0, marker="\n[note cut to fit the context]"
+        )
     return note, messages[cut:]

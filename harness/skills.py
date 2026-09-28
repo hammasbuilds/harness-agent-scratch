@@ -72,7 +72,9 @@ def discover_skills(dirs: list[Path]) -> dict[str, Skill]:
         if not base.is_dir():
             continue
         for folder in sorted(p for p in base.iterdir() if p.is_dir()):
-            path = next((folder / n for n in ("SKILL.md", "skill.md") if (folder / n).is_file()), None)
+            path = next(
+                (folder / n for n in ("SKILL.md", "skill.md") if (folder / n).is_file()), None
+            )
             if path is None:
                 continue
             meta = parse_front_matter(path.read_text(encoding="utf-8", errors="replace"))
@@ -94,11 +96,16 @@ def skills_prompt(skills: dict[str, Skill]) -> str:
     lines, used = [], 0
     ordered = sorted(skills.values(), key=lambda s: s.name)
     for n, s in enumerate(ordered):
-        desc = s.description if len(s.description) <= MAX_DESCRIPTION_CHARS else \
-            s.description[:MAX_DESCRIPTION_CHARS].rstrip() + "..."
+        desc = (
+            s.description
+            if len(s.description) <= MAX_DESCRIPTION_CHARS
+            else s.description[:MAX_DESCRIPTION_CHARS].rstrip() + "..."
+        )
         line = f"- {s.name[:80]}: {desc}"
         if used + len(line) > MAX_LISTING_CHARS:
-            lines.append(f"- ... and {len(ordered) - n} more skills not listed (the listing is capped)")
+            lines.append(
+                f"- ... and {len(ordered) - n} more skills not listed (the listing is capped)"
+            )
             break
         lines.append(line)
         used += len(line) + 1

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
 DEFAULT_BASE_URLS = {
     "ollama": "http://localhost:11434",
@@ -27,6 +27,16 @@ PROJECT_SETTINGS = frozenset({"HARNESS_TEMPERATURE", "HARNESS_COMPACT_AT", "HARN
 _QUOTED = re.compile(r"""(["'])(.*?)\1\s*(#.*)?$""")
 
 
+MAX_OUTPUT_DEFAULT = 2048
+
+
+def default_output_tokens(context_limit: int) -> int:
+    """The reply reservation when none is set: 2,048 tokens, or a quarter of a
+    smaller context. A fixed 2,048 made every num_ctx under 4,096 an error
+    unless HARNESS_MAX_OUTPUT_TOKENS was lowered by hand as well."""
+    return max(64, min(MAX_OUTPUT_DEFAULT, context_limit // 4))
+
+
 def user_config_file(env: Mapping[str, str]) -> Path:
     return Path(env.get("HARNESS_CONFIG") or Path.home() / ".config" / "harness" / ".env")
 
@@ -41,7 +51,9 @@ def _dotenv_value(raw: str) -> str:
     return re.split(r"\s+#", raw, maxsplit=1)[0].strip()
 
 
-def load_dotenv(path: Path, environ: dict | None = None, only: frozenset[str] | None = None) -> list[str]:
+def load_dotenv(
+    path: Path, environ: dict | None = None, only: frozenset[str] | None = None
+) -> list[str]:
     """Fill unset variables from a KEY=VALUE file. Variables already set win.
 
     With `only`, other keys are not loaded; the HARNESS_ ones among them are
@@ -81,7 +93,7 @@ class Config:
     num_ctx: int = 8192
     keep_alive: str = "30m"  # keep the model loaded so its prompt cache survives between turns
     request_timeout: float = 900.0  # CPU inference is slow; one call can take minutes
-    retries: int = 2  # extra attempts after a rate limit, 5xx or dropped connection
+    retries: int = 2  # extra attempts after a rate limit, 5xx or a connection lost before sending
     # Longest reply the model may write. On a CPU a rambling model would
     # otherwise generate until the request timeout, minutes of wasted work.
     max_output_tokens: int = 2048
@@ -98,9 +110,19 @@ class Config:
     def __post_init__(self):
         problems = []
         if not 0 < self.compact_to < self.compact_at <= 1:
-            problems.append(f"need 0 < compact_to ({self.compact_to}) < compact_at ({self.compact_at}) <= 1")
-        for name, low in (("num_ctx", 512), ("context_limit", 512), ("output_cap", 200), ("max_steps", 1),
-                          ("subagent_max_steps", 1), ("num_thread", 1), ("retries", 0), ("max_output_tokens", 64)):
+            problems.append(
+                f"need 0 < compact_to ({self.compact_to}) < compact_at ({self.compact_at}) <= 1"
+            )
+        for name, low in (
+            ("num_ctx", 512),
+            ("context_limit", 512),
+            ("output_cap", 200),
+            ("max_steps", 1),
+            ("subagent_max_steps", 1),
+            ("num_thread", 1),
+            ("retries", 0),
+            ("max_output_tokens", 64),
+        ):
             if getattr(self, name) < low:
                 problems.append(f"{name} must be at least {low}, got {getattr(self, name)}")
         if not self.request_timeout > 0:
@@ -111,18 +133,22 @@ class Config:
         if not (0 < self.compact_at <= 1 and 0 < self.compact_to < 1):
             problems.append("compact_at and compact_to must be numbers between 0 and 1")
         if self.max_output_tokens * 2 > self.context_limit:
-            problems.append(f"max_output_tokens ({self.max_output_tokens}) must be at most half of "
-                            f"context_limit ({self.context_limit}); the prompt needs the rest")
+            problems.append(
+                f"max_output_tokens ({self.max_output_tokens}) must be at most half of "
+                f"context_limit ({self.context_limit}); the prompt needs the rest"
+            )
         if self.backend == "ollama" and self.context_limit > self.num_ctx:
             # Ollama silently drops the start of a prompt longer than num_ctx, so
             # compaction must trigger below it.
-            problems.append(f"context_limit ({self.context_limit}) is above num_ctx ({self.num_ctx}); "
-                            "Ollama would cut the prompt before compaction ever ran")
+            problems.append(
+                f"context_limit ({self.context_limit}) is above num_ctx ({self.num_ctx}); "
+                "Ollama would cut the prompt before compaction ever ran"
+            )
         if problems:
             raise ValueError("invalid settings: " + "; ".join(problems))
 
     @classmethod
-    def from_env(cls, workspace: Path, env: Mapping[str, str]) -> "Config":
+    def from_env(cls, workspace: Path, env: Mapping[str, str]) -> Config:
         def get(key: str, default: str) -> str:
             return env.get(f"HARNESS_{key}", default)
 
@@ -137,8 +163,13 @@ class Config:
 
         backend = get("BACKEND", "ollama").lower()
         if backend not in DEFAULT_BASE_URLS:
-            raise ValueError(f"HARNESS_BACKEND must be one of {sorted(DEFAULT_BASE_URLS)}, got {backend!r}")
+            raise ValueError(
+                f"HARNESS_BACKEND must be one of {sorted(DEFAULT_BASE_URLS)}, got {backend!r}"
+            )
         num_ctx = number("NUM_CTX", 8192, int)
+        # With Ollama the real ceiling is num_ctx; past it Ollama drops the
+        # start of the prompt without telling anyone.
+        context_limit = number("CONTEXT_LIMIT", num_ctx if backend == "ollama" else 64000, int)
         skills_raw = env.get("HARNESS_SKILLS_DIRS")
         return cls(
             workspace=Path(workspace).resolve(),
@@ -153,10 +184,10 @@ class Config:
             keep_alive=get("KEEP_ALIVE", "30m"),
             request_timeout=number("REQUEST_TIMEOUT", 900.0, float),
             retries=number("RETRIES", 2, int),
-            max_output_tokens=number("MAX_OUTPUT_TOKENS", 2048, int),
-            # With Ollama the real ceiling is num_ctx; past it Ollama drops the
-            # start of the prompt without telling anyone.
-            context_limit=number("CONTEXT_LIMIT", num_ctx if backend == "ollama" else 64000, int),
+            max_output_tokens=number(
+                "MAX_OUTPUT_TOKENS", default_output_tokens(context_limit), int
+            ),
+            context_limit=context_limit,
             compact_at=number("COMPACT_AT", 0.85, float),
             compact_to=number("COMPACT_TO", 0.35, float),
             output_cap=number("OUTPUT_CAP", 3000, int),
@@ -164,6 +195,8 @@ class Config:
             subagent_max_steps=number("SUBAGENT_MAX_STEPS", 20, int),
             shell=env.get("HARNESS_SHELL") or None,
             # An override, not an extra path: when set, only these folders are searched.
-            skills_dirs=[Path(p) for p in skills_raw.split(os.pathsep) if p] if skills_raw is not None else None,
+            skills_dirs=[Path(p) for p in skills_raw.split(os.pathsep) if p]
+            if skills_raw is not None
+            else None,
             sandbox=get("SANDBOX", "auto"),
         )

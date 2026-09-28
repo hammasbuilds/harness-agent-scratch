@@ -19,8 +19,8 @@ import ntpath
 import os
 import platform
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 SEATBELT_PROFILE = """(version 1)
 (allow default)
@@ -41,8 +41,13 @@ class SandboxUnavailable(RuntimeError):
 
 
 class Sandbox:
-    def __init__(self, workspace: Path, mode: str = "auto", system: str | None = None,
-                 which: Callable[[str], str | None] = shutil.which):
+    def __init__(
+        self,
+        workspace: Path,
+        mode: str = "auto",
+        system: str | None = None,
+        which: Callable[[str], str | None] = shutil.which,
+    ):
         if mode not in ("auto", "none", "required"):
             raise ValueError(f"sandbox mode must be auto, none or required, got {mode!r}")
         self.workspace = str(Path(workspace).resolve())
@@ -52,10 +57,14 @@ class Sandbox:
         if mode != "none":
             if system == "Linux" and (found := trusted_which("bwrap", self.workspace, which)):
                 self.kind, self.program = "bwrap", found
-            elif system == "Darwin" and (found := trusted_which("sandbox-exec", self.workspace, which)):
+            elif system == "Darwin" and (
+                found := trusted_which("sandbox-exec", self.workspace, which)
+            ):
                 self.kind, self.program = "seatbelt", found
         if mode == "required" and self.kind == "none":
-            raise SandboxUnavailable(f"no sandbox available on {system}; use HARNESS_SANDBOX=none to run unconfined")
+            raise SandboxUnavailable(
+                f"no sandbox available on {system}; use HARNESS_SANDBOX=none to run unconfined"
+            )
 
     def wrap(self, argv: list[str]) -> list[str]:
         if self.kind == "bwrap":
@@ -67,12 +76,40 @@ class Sandbox:
             # a training job; --new-session blocks TIOCSTI keystroke injection.
             # Order matters: /tmp and /run are replaced first, so a workspace under
             # either is bound back in afterwards and stays writable.
-            return [self.program, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-                    "--tmpfs", "/tmp", "--tmpfs", "/run", "--bind", ws, ws,
-                    "--unshare-net", "--unshare-pid", "--unshare-ipc", "--new-session", "--die-with-parent",
-                    "--chdir", ws, *argv]
+            return [
+                self.program,
+                "--ro-bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+                "--tmpfs",
+                "/tmp",
+                "--tmpfs",
+                "/run",
+                "--bind",
+                ws,
+                ws,
+                "--unshare-net",
+                "--unshare-pid",
+                "--unshare-ipc",
+                "--new-session",
+                "--die-with-parent",
+                "--chdir",
+                ws,
+                *argv,
+            ]
         if self.kind == "seatbelt":
-            return [self.program, "-p", SEATBELT_PROFILE, "-D", f"WORKSPACE={self.workspace}", *argv]
+            return [
+                self.program,
+                "-p",
+                SEATBELT_PROFILE,
+                "-D",
+                f"WORKSPACE={self.workspace}",
+                *argv,
+            ]
         return list(argv)
 
     def describe(self) -> str:
@@ -100,9 +137,12 @@ POSIX_RUNNER = f'eval "${COMMAND_VAR}"'
 CMD_RUNNER = f"%{COMMAND_VAR}%"
 
 
-def trusted_which(name: str, workspace: Path | None = None,
-                  which: Callable[[str], str | None] = shutil.which,
-                  isabs: Callable[[str], bool] = os.path.isabs) -> str | None:
+def trusted_which(
+    name: str,
+    workspace: Path | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    isabs: Callable[[str], bool] = os.path.isabs,
+) -> str | None:
     """An absolute path to `name` from PATH, never relative (a `.` in PATH) and
     never inside the workspace, where a repository could have put its own."""
     found = which(name)
@@ -120,13 +160,16 @@ def trusted_which(name: str, workspace: Path | None = None,
 
 
 def system_cmd() -> str:
-    return ntpath.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe")
+    return ntpath.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "cmd.exe")
 
 
-def find_shell(configured: str | None = None, system: str | None = None,
-               which: Callable[[str], str | None] = shutil.which,
-               exists: Callable[[str], bool] = os.path.exists,
-               workspace: Path | None = None) -> tuple[list[str], str]:
+def find_shell(
+    configured: str | None = None,
+    system: str | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    exists: Callable[[str], bool] = os.path.exists,
+    workspace: Path | None = None,
+) -> tuple[list[str], str]:
     """Return (argv, description): the argv runs whatever is in COMMAND_VAR."""
     system = system or platform.system()
     # Judge absoluteness by the target system's rules, so the Windows branch
@@ -139,13 +182,18 @@ def find_shell(configured: str | None = None, system: str | None = None,
         return [configured, "-c", POSIX_RUNNER], configured
     if system == "Windows":
         git_bash = "Git Bash (POSIX shell syntax; use forward slashes)"
-        roots = [ntpath.join(os.environ.get(v, d), "Git") for v, d in
-                 (("ProgramFiles", r"C:\Program Files"), ("ProgramFiles(x86)", r"C:\Program Files (x86)"))]
+        roots = [
+            ntpath.join(os.environ.get(v, d), "Git")
+            for v, d in (
+                ("ProgramFiles", r"C:\Program Files"),
+                ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+            )
+        ]
         # Portable or per-user Git: find git.exe and look for bin\bash.exe beside it.
         git = find("git")
         if git:
             parent = ntpath.dirname(ntpath.dirname(git))  # ...\cmd\git.exe or ...\bin\git.exe
-            roots += [parent, ntpath.dirname(parent)]     # ...\mingw64\bin\git.exe
+            roots += [parent, ntpath.dirname(parent)]  # ...\mingw64\bin\git.exe
         for root in roots:
             candidate = ntpath.join(root, "bin", "bash.exe")  # Windows separators on any host
             if exists(candidate):
@@ -157,4 +205,6 @@ def find_shell(configured: str | None = None, system: str | None = None,
             return [found, "-c", POSIX_RUNNER], "bash"
         return [system_cmd(), "/d", "/c", CMD_RUNNER], "cmd.exe (Windows command syntax)"
     found = find("bash")
-    return ([found, "-c", POSIX_RUNNER], "bash") if found else (["/bin/sh", "-c", POSIX_RUNNER], "sh")
+    return (
+        ([found, "-c", POSIX_RUNNER], "bash") if found else (["/bin/sh", "-c", POSIX_RUNNER], "sh")
+    )

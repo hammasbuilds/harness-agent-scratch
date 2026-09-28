@@ -1,5 +1,6 @@
 """The agent loop, driven by a scripted model. The tools really run."""
 
+import itertools
 import json
 
 import pytest
@@ -7,14 +8,16 @@ import pytest
 from harness.agent import STRIPPED_KEEP
 from harness.compaction import estimate_tokens
 from harness.llm import Reply, ScriptedLLM, ToolCall, call
-from harness.skills import Skill
 
 
 def test_final_answer_without_tools(make_agent):
     llm = ScriptedLLM([Reply("hello")])
     agent = make_agent(llm)
     assert agent.send("hi") == "hello"
-    assert agent.messages == [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+    assert agent.messages == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
 
 
 def test_tool_result_is_fed_back_and_the_loop_continues(make_agent, workspace):
@@ -29,55 +32,79 @@ def test_tool_result_is_fed_back_and_the_loop_continues(make_agent, workspace):
 
 
 def test_several_calls_in_one_reply_all_get_results(make_agent, workspace):
-    llm = ScriptedLLM([
-        Reply("", [call("write_file", path="a.txt", content="1"), call("write_file", path="b.txt", content="2")]),
-        Reply("done"),
-    ])
+    llm = ScriptedLLM(
+        [
+            Reply(
+                "",
+                [
+                    call("write_file", path="a.txt", content="1"),
+                    call("write_file", path="b.txt", content="2"),
+                ],
+            ),
+            Reply("done"),
+        ]
+    )
     agent = make_agent(llm)
     agent.send("make two files")
     tool_msgs = [m for m in agent.messages if m["role"] == "tool"]
-    assert [m["content"] for m in tool_msgs] == ["wrote 1 characters to a.txt", "wrote 1 characters to b.txt"]
+    assert [m["content"] for m in tool_msgs] == [
+        "wrote 1 characters to a.txt",
+        "wrote 1 characters to b.txt",
+    ]
     assert (workspace / "b.txt").read_text() == "2"
 
 
 def test_errors_go_back_to_the_model_instead_of_crashing(make_agent):
-    llm = ScriptedLLM([
-        Reply("", [call("no_such_tool")]),
-        Reply("", [call("read_file", path="missing.txt")]),
-        Reply("recovered"),
-    ])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("no_such_tool")]),
+            Reply("", [call("read_file", path="missing.txt")]),
+            Reply("recovered"),
+        ]
+    )
     agent = make_agent(llm)
     assert agent.send("go") == "recovered"
     results = [m["content"] for m in agent.messages if m["role"] == "tool"]
-    assert results[0].startswith("error: unknown tool") and results[1].startswith("error: missing.txt")
+    assert results[0].startswith("error: unknown tool") and results[1].startswith(
+        "error: missing.txt"
+    )
 
 
 def test_the_request_prefix_never_changes_within_a_turn(make_agent, workspace):
     """The prefix-cache rule: every request starts with the previous one, minus
     only the reminder at the end."""
     (workspace / "f.txt").write_text("x")
-    llm = ScriptedLLM([
-        Reply("", [call("write_todos", todos=[{"content": "step", "status": "in_progress"}])]),
-        Reply("", [call("read_file", path="f.txt")]),
-        Reply("", [call("bash", command="ls")]),
-        Reply("done"),
-    ])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("write_todos", todos=[{"content": "step", "status": "in_progress"}])]),
+            Reply("", [call("read_file", path="f.txt")]),
+            Reply("", [call("bash", command="ls")]),
+            Reply("done"),
+        ]
+    )
     agent = make_agent(llm)
     agent.send("do it")
     requests = [r for r, _ in llm.requests]
-    for prev, nxt in zip(requests, requests[1:]):
-        assert nxt[:len(prev) - 1] == prev[:-1]
+    for prev, nxt in itertools.pairwise(requests):
+        assert nxt[: len(prev) - 1] == prev[:-1]
     tools = [t for _, t in llm.requests]
     assert all(t == tools[0] for t in tools)
 
 
 def test_reminder_is_last_and_never_stored(make_agent):
-    llm = ScriptedLLM([Reply("", [call("write_todos", todos=[{"content": "plan", "status": "in_progress"}])]),
-                       Reply("ok")])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("write_todos", todos=[{"content": "plan", "status": "in_progress"}])]),
+            Reply("ok"),
+        ]
+    )
     agent = make_agent(llm)
     agent.send("hi")
     first, second = llm.requests[0][0], llm.requests[1][0]
-    assert first[-1]["content"].startswith("<system-reminder>") and "Today: 2026-09-26" in first[-1]["content"]
+    assert (
+        first[-1]["content"].startswith("<system-reminder>")
+        and "Today: 2026-09-26" in first[-1]["content"]
+    )
     assert "[>] plan" not in first[-1]["content"]
     assert "[>] plan" in second[-1]["content"]  # the todo list shows up in the next request
     assert not any("<system-reminder>" in (m.get("content") or "") for m in agent.messages)
@@ -86,7 +113,9 @@ def test_reminder_is_last_and_never_stored(make_agent):
 def test_system_prompt_is_static_and_lists_skills(cfg, make_agent, tmp_path):
     skill_dir = tmp_path / "skills" / "wordle"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: wordle\ndescription: Solve today's Wordle.\n---\nbody")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: wordle\ndescription: Solve today's Wordle.\n---\nbody"
+    )
     cfg.skills_dirs = [tmp_path / "skills"]
     agent = make_agent(ScriptedLLM([]))
     system = agent.system_message()["content"]
@@ -102,18 +131,23 @@ def test_stale_file_warning_reaches_the_model(make_agent, workspace):
     def edit_behind_its_back(messages):
         f.write_text("A = 2\n")
         import os
+
         later = f.stat().st_mtime + 5
         os.utime(f, (later, later))
         return Reply("", [call("bash", command="pwd")])
 
-    llm = ScriptedLLM([Reply("", [call("read_file", path="config.py")]), edit_behind_its_back, Reply("ok")])
+    llm = ScriptedLLM(
+        [Reply("", [call("read_file", path="config.py")]), edit_behind_its_back, Reply("ok")]
+    )
     make_agent(llm).send("check config")
     assert "- config.py" in llm.requests[2][0][-1]["content"]
 
 
 def test_old_tool_outputs_are_trimmed_when_a_new_turn_starts(make_agent, workspace):
     (workspace / "big.txt").write_text("y" * 1000)
-    llm = ScriptedLLM([Reply("", [call("read_file", path="big.txt")]), Reply("read it"), Reply("second answer")])
+    llm = ScriptedLLM(
+        [Reply("", [call("read_file", path="big.txt")]), Reply("read it"), Reply("second answer")]
+    )
     agent = make_agent(llm)
     agent.send("read big.txt")
     assert agent.messages[2]["content"] == "y" * 1000  # still whole during its own turn
@@ -133,12 +167,14 @@ def test_max_steps_stops_a_runaway_loop(cfg, make_agent):
 
 def test_compaction_kicks_in_and_moves_history_into_the_system_prompt(cfg, make_agent, workspace):
     (workspace / "big.txt").write_text("some notes " * 27)
-    llm = ScriptedLLM([
-        Reply("", [call("read_file", path="big.txt")]),
-        Reply("first done"),
-        Reply("HANDOFF: read big.txt, it is all z"),  # the compaction call
-        Reply("second done"),
-    ])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("read_file", path="big.txt")]),
+            Reply("first done"),
+            Reply("HANDOFF: read big.txt, it is all z"),  # the compaction call
+            Reply("second done"),
+        ]
+    )
     events = []
     agent = make_agent(llm, on_event=lambda k, d: events.append(k))
     # Room for about 400 tokens of transcript on top of the fixed overhead.
@@ -150,7 +186,9 @@ def test_compaction_kicks_in_and_moves_history_into_the_system_prompt(cfg, make_
     assert "compacted" in events
     assert agent.summary == "HANDOFF: read big.txt, it is all z"
     assert "HANDOFF" in agent.system_message()["content"]
-    assert agent.messages[0]["role"] == "user" and agent.messages[0]["content"].startswith("now summarise")
+    assert agent.messages[0]["role"] == "user" and agent.messages[0]["content"].startswith(
+        "now summarise"
+    )
     compaction_request = llm.requests[2]
     assert compaction_request[1] is None  # no tools offered to the summariser
 
@@ -174,7 +212,9 @@ def test_the_budget_counts_everything_that_is_sent(make_agent):
 
 
 def test_ctrl_c_mid_tool_leaves_a_valid_transcript(make_agent):
-    llm = ScriptedLLM([Reply("", [call("bash", command="pwd"), call("bash", command="ls")]), Reply("resumed")])
+    llm = ScriptedLLM(
+        [Reply("", [call("bash", command="pwd"), call("bash", command="ls")]), Reply("resumed")]
+    )
     agent = make_agent(llm)
     real = agent.toolbox.call
     state = {"n": 0}
@@ -203,8 +243,12 @@ def test_empty_and_cut_off_replies_are_not_silent(make_agent):
 
 
 def test_a_model_stuck_repeating_one_call_is_told(make_agent):
-    same = lambda: Reply("", [call("bash", command="pwd")])
-    llm = ScriptedLLM([same(), same(), same(), Reply("", [call("bash", command="ls")]), Reply("ok")])
+    def same():
+        return Reply("", [call("bash", command="pwd")])
+
+    llm = ScriptedLLM(
+        [same(), same(), same(), Reply("", [call("bash", command="ls")]), Reply("ok")]
+    )
     agent = make_agent(llm)
     agent.send("go")
     results = [m["content"] for m in agent.messages if m["role"] == "tool"]
@@ -218,14 +262,19 @@ def test_one_turn_with_many_big_results_is_squeezed_under_the_limit(cfg, make_ag
     no older turn to compact, so the current turn's outputs must shrink."""
     for i in range(8):
         (workspace / f"f{i}.txt").write_text(f"line {chr(97 + i)} of words " * 150)
-    llm = ScriptedLLM([Reply("", [call("read_file", path=f"f{i}.txt") for i in range(8)]), Reply("done")])
+    llm = ScriptedLLM(
+        [Reply("", [call("read_file", path=f"f{i}.txt") for i in range(8)]), Reply("done")]
+    )
     events = []
     agent = make_agent(llm, on_event=lambda k, d: events.append(k))
     cfg.context_limit = agent.overhead_tokens() + 4000
     cfg.output_cap = 3000
     agent.send("read them all")
     second_request, tools = llm.requests[1]
-    assert estimate_tokens(second_request) + estimate_tokens(tools) <= cfg.compact_at * cfg.context_limit
+    assert (
+        estimate_tokens(second_request) + estimate_tokens(tools)
+        <= cfg.compact_at * cfg.context_limit
+    )
     assert "squeezed" in events  # and no ContextOverflow: the request fit after squeezing
     outputs = [m["content"] for m in agent.messages if m["role"] == "tool"]
     assert outputs[0].endswith("removed to fit the context]")  # oldest cut first
@@ -245,6 +294,7 @@ def test_big_call_arguments_are_trimmed_once_their_call_has_run(cfg, make_agent,
 
 def test_a_request_that_cannot_fit_is_refused_not_sent(cfg, make_agent):
     from harness.llm import ContextOverflow
+
     llm = ScriptedLLM([Reply("never")])
     agent = make_agent(llm)
     cfg.context_limit = agent.overhead_tokens() + 500
@@ -261,8 +311,14 @@ def test_a_deleted_file_is_reported_once(make_agent, workspace):
         f.unlink()
         return Reply("", [call("bash", command="pwd")])
 
-    llm = ScriptedLLM([Reply("", [call("read_file", path="tmp.txt")]), delete_it,
-                       Reply("", [call("bash", command="ls")]), Reply("done")])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("read_file", path="tmp.txt")]),
+            delete_it,
+            Reply("", [call("bash", command="ls")]),
+            Reply("done"),
+        ]
+    )
     make_agent(llm).send("go")
     reminders = [r[-1]["content"] for r, _ in llm.requests]
     assert "- tmp.txt" in reminders[2]
@@ -271,12 +327,14 @@ def test_a_deleted_file_is_reported_once(make_agent, workspace):
 
 def test_subagent_cannot_run_commands_that_would_ask(make_agent, workspace, allow):
     (workspace / "keep.txt").write_text("x")
-    llm = ScriptedLLM([
-        Reply("", [call("task", prompt="clean up")]),
-        Reply("", [call("bash", command="rm keep.txt")]),  # the subagent
-        Reply("could not delete"),
-        Reply("ok"),
-    ])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("task", prompt="clean up")]),
+            Reply("", [call("bash", command="rm keep.txt")]),  # the subagent
+            Reply("could not delete"),
+            Reply("ok"),
+        ]
+    )
     make_agent(llm, approve=allow).send("go")
     assert (workspace / "keep.txt").exists()
     assert allow.asked == []  # the user was never asked on the subagent's behalf
@@ -297,7 +355,10 @@ class GreedySubagentModel:
             if tools is None:
                 return Reply("partial answer")
             self.n += 1
-            return Reply("", [ToolCall(f"s{self.n}", "read_file", json.dumps({"path": f"f{self.n % 20}.txt"}))])
+            return Reply(
+                "",
+                [ToolCall(f"s{self.n}", "read_file", json.dumps({"path": f"f{self.n % 20}.txt"}))],
+            )
         if any(m["role"] == "tool" for m in messages):
             return Reply("main done")
         return Reply("", [ToolCall("m1", "task", json.dumps({"prompt": "read everything"}))])
@@ -322,7 +383,13 @@ def test_subagent_is_made_to_answer_before_it_overflows(cfg, make_agent, workspa
 def test_git_is_asked_once_per_step(make_agent, monkeypatch):
     calls = []
     monkeypatch.setattr("harness.agent.git_summary", lambda ws: calls.append(ws) or "branch main")
-    llm = ScriptedLLM([Reply("", [call("bash", command="pwd")]), Reply("", [call("bash", command="ls")]), Reply("ok")])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("bash", command="pwd")]),
+            Reply("", [call("bash", command="ls")]),
+            Reply("ok"),
+        ]
+    )
     make_agent(llm).send("go")
     assert len(calls) == 3  # one per model call, however many token estimates each step makes
 
@@ -331,6 +398,7 @@ def test_the_prompt_leaves_room_for_the_reply(cfg, make_agent):
     # Ollama's num_ctx holds the reply too; a prompt that fills it makes Ollama
     # shift the context mid-reply and drop the start of the prompt.
     from harness.llm import ContextOverflow
+
     agent = make_agent(ScriptedLLM([Reply("never")]))
     cfg.max_output_tokens = 1000
     cfg.context_limit = agent.overhead_tokens() + 1500
@@ -356,9 +424,14 @@ def test_the_compaction_request_fits_beside_its_reply(cfg, make_agent, workspace
     cfg.max_output_tokens, cfg.context_limit = 2048, 8192
     agent = make_agent(ScriptedLLM([]))
     agent.summary = "earlier: " + "note " * 1500  # a previous handoff note near its cap
-    agent.messages = [m for n in range(12) for m in [
-        {"role": "user", "content": f"task {n} " + "q" * 3000},
-        {"role": "assistant", "content": f"done {n} " + "a" * 3000}]]
+    agent.messages = [
+        m
+        for n in range(12)
+        for m in [
+            {"role": "user", "content": f"task {n} " + "q" * 3000},
+            {"role": "assistant", "content": f"done {n} " + "a" * 3000},
+        ]
+    ]
     agent.messages.append({"role": "user", "content": "latest"})
     seen = []
 
@@ -377,20 +450,26 @@ def test_the_fixed_context_fits_at_default_settings_with_every_cap_full(cfg, mak
     from harness.agent import SUMMARY_SHARE
     from harness.compaction import fit_tokens
     from harness.todos import MAX_ITEM_CHARS, MAX_ITEMS
+
     skills = tmp_path / "skills"
     for i in range(12):
         (skills / f"s{i}").mkdir(parents=True)
-        (skills / f"s{i}" / "SKILL.md").write_text(f"---\nname: skill{i}\ndescription: {'does a thing well ' * 16}\n---\n")
+        (skills / f"s{i}" / "SKILL.md").write_text(
+            f"---\nname: skill{i}\ndescription: {'does a thing well ' * 16}\n---\n"
+        )
     cfg.skills_dirs = [skills]
     cfg.max_output_tokens, cfg.context_limit = 2048, 8192
     agent = make_agent(ScriptedLLM([]))
-    agent.todos.replace([{"content": "w" * MAX_ITEM_CHARS, "status": "pending"} for _ in range(MAX_ITEMS)])
+    agent.todos.replace(
+        [{"content": "w" * MAX_ITEM_CHARS, "status": "pending"} for _ in range(MAX_ITEMS)]
+    )
     agent.summary = fit_tokens("the note says things " * 2000, int(8192 * SUMMARY_SHARE))
     assert agent.overhead_tokens() < agent.prompt_budget()
 
 
 def test_an_oversized_fixed_context_is_named_as_the_cause(cfg, make_agent):
     from harness.llm import ContextOverflow
+
     llm = ScriptedLLM([])
     agent = make_agent(llm)
     agent.summary = "note " * 20_000
@@ -400,8 +479,44 @@ def test_an_oversized_fixed_context_is_named_as_the_cause(cfg, make_agent):
 
 
 def test_a_cut_off_subagent_answer_says_so():
-    from harness.subagent import _finish
-    assert _finish("half an ans", lambda k, d: None, truncated=True).endswith("cut off at the model's output limit]")
+    from harness.subagent import _answer
+
+    assert _answer("half an ans", truncated=True).endswith("cut off at the model's output limit]")
+
+
+def _subagent_events(make_agent, replies):
+    events = []
+    agent = make_agent(ScriptedLLM(replies), on_event=lambda kind, data: events.append(kind))
+    return agent, events
+
+
+def test_the_subagent_end_event_follows_a_failed_model_call(make_agent):
+    from harness.llm import LLMError
+
+    # One reply for the main agent's task call, then the model fails mid-subagent.
+    agent, events = _subagent_events(make_agent, [Reply("", [call("task", prompt="look")])])
+    with pytest.raises(LLMError):
+        agent.send("explore")
+    subagent = [k for k in events if k.startswith("subagent_")]
+    assert subagent == ["subagent_start", "subagent_end"]  # the end was once never sent
+
+
+@pytest.mark.parametrize(
+    "replies",
+    [
+        [Reply("", [call("task", prompt="look")]), Reply("found it"), Reply("done")],
+        [
+            Reply("", [call("task", prompt="look")]),
+            Reply("", [call("bash", command="pwd")]),
+            Reply("found it"),
+            Reply("done"),
+        ],
+    ],
+)
+def test_every_subagent_start_has_exactly_one_end(make_agent, replies):
+    agent, events = _subagent_events(make_agent, replies)
+    assert agent.send("explore") == "done"
+    assert events.count("subagent_start") == events.count("subagent_end") == 1
 
 
 def test_a_subagent_prompt_too_big_to_answer_is_not_sent(cfg, make_agent):
@@ -425,6 +540,7 @@ def test_spill_files_are_removed_when_the_turn_ends(cfg, make_agent, workspace):
 
 def test_llm_errors_propagate_but_the_spill_is_still_cleaned(cfg, make_agent, workspace):
     from harness.llm import LLMError
+
     cfg.output_cap = 10
     (workspace / "long.txt").write_text("L" * 100)
     llm = ScriptedLLM([Reply("", [call("read_file", path="long.txt")])])  # then runs out
@@ -436,13 +552,17 @@ def test_llm_errors_propagate_but_the_spill_is_still_cleaned(cfg, make_agent, wo
 
 def test_subagent_is_isolated_and_read_only(make_agent, workspace):
     (workspace / "README.md").write_text("# Neural Code\nA coding harness.")
-    llm = ScriptedLLM([
-        Reply("", [call("task", prompt="What is this repo?")]),               # main agent delegates
-        Reply("", [call("write_file", path="hack.txt", content="x")]),         # subagent tries to write
-        Reply("", [call("read_file", path="README.md")]),                      # subagent reads
-        Reply("It is Neural Code, a coding harness."),                         # subagent answers
-        Reply("The subagent says it is a coding harness."),                    # main agent answers
-    ])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("task", prompt="What is this repo?")]),  # main agent delegates
+            Reply(
+                "", [call("write_file", path="hack.txt", content="x")]
+            ),  # subagent tries to write
+            Reply("", [call("read_file", path="README.md")]),  # subagent reads
+            Reply("It is Neural Code, a coding harness."),  # subagent answers
+            Reply("The subagent says it is a coding harness."),  # main agent answers
+        ]
+    )
     agent = make_agent(llm)
     assert agent.send("explore this repo") == "The subagent says it is a coding harness."
 
@@ -455,13 +575,17 @@ def test_subagent_is_isolated_and_read_only(make_agent, workspace):
 
     main_msgs = agent.messages
     assert [m["role"] for m in main_msgs] == ["user", "assistant", "tool", "assistant"]
-    assert main_msgs[2]["content"] == "It is Neural Code, a coding harness."  # only the final answer
+    assert (
+        main_msgs[2]["content"] == "It is Neural Code, a coding harness."
+    )  # only the final answer
 
 
 def test_read_skill_through_the_loop(cfg, make_agent, tmp_path):
     skill_dir = tmp_path / "skills" / "boids"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: boids\ndescription: Flocking sims.\n---\nUse separation, alignment, cohesion.")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: boids\ndescription: Flocking sims.\n---\nUse separation, alignment, cohesion."
+    )
     cfg.skills_dirs = [tmp_path / "skills"]
     llm = ScriptedLLM([Reply("", [call("read_skill", name="boids")]), Reply("ok")])
     agent = make_agent(llm)
@@ -470,7 +594,12 @@ def test_read_skill_through_the_loop(cfg, make_agent, tmp_path):
 
 
 def test_reset_clears_the_session(make_agent):
-    llm = ScriptedLLM([Reply("", [call("write_todos", todos=[{"content": "a", "status": "pending"}])]), Reply("x")])
+    llm = ScriptedLLM(
+        [
+            Reply("", [call("write_todos", todos=[{"content": "a", "status": "pending"}])]),
+            Reply("x"),
+        ]
+    )
     agent = make_agent(llm)
     agent.send("go")
     agent.summary = "old"
@@ -485,4 +614,6 @@ def test_assistant_text_alongside_tool_calls_is_kept(make_agent):
     agent.send("go")
     assert ("assistant_text", "Let me look.") in events
     assert agent.messages[1]["content"] == "Let me look."
-    assert json.loads(agent.messages[1]["tool_calls"][0]["function"]["arguments"]) == {"command": "pwd"}
+    assert json.loads(agent.messages[1]["tool_calls"][0]["function"]["arguments"]) == {
+        "command": "pwd"
+    }

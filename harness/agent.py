@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import json
 import platform
+from collections.abc import Callable
 from datetime import date
-from typing import Callable
 
 from .compaction import compact, estimate_tokens, text_tokens
 from .config import Config
@@ -40,7 +40,8 @@ Work by using tools; never guess what a file contains.
 - To explore a question without filling this conversation, hand it to a subagent with task.
 - Long tool output is cut short; the note at its end says where the full text is.
 - A <system-reminder> at the end of a request comes from the harness, not the user.
-- When the work is done, reply with a short summary of what you changed. Do not call a tool in that reply.
+- When the work is done, reply with a short summary of what you changed.
+  Do not call a tool in that reply.
 
 Skills (load one with read_skill when it fits the task):
 {skills}"""
@@ -53,10 +54,16 @@ COMPACT_OVERHEAD = 400  # tokens for the summariser's instructions and the messa
 
 
 class Agent:
-    def __init__(self, cfg: Config, llm: LLM, approve: Approver, *,
-                 on_event: Callable[[str, object], None] | None = None,
-                 today: Callable[[], date] = date.today,
-                 sandbox: Sandbox | None = None):
+    def __init__(
+        self,
+        cfg: Config,
+        llm: LLM,
+        approve: Approver,
+        *,
+        on_event: Callable[[str, object], None] | None = None,
+        today: Callable[[], date] = date.today,
+        sandbox: Sandbox | None = None,
+    ):
         self.cfg = cfg
         self.llm = llm
         self.on_event = on_event or (lambda kind, data: None)
@@ -65,10 +72,20 @@ class Agent:
         dirs = cfg.skills_dirs if cfg.skills_dirs is not None else default_skill_dirs(cfg.workspace)
         self.skills = discover_skills(dirs)
         self.sandbox = sandbox or Sandbox(cfg.workspace, cfg.sandbox)
-        self.toolbox = Toolbox(cfg, approve, skills=self.skills, todos=self.todos, sandbox=self.sandbox,
-                               subagent=self._subagent)
-        self.system = SYSTEM_PROMPT.format(workspace=self.toolbox.workspace, os=platform.system(),
-                                           shell=self.toolbox.shell_name, skills=skills_prompt(self.skills))
+        self.toolbox = Toolbox(
+            cfg,
+            approve,
+            skills=self.skills,
+            todos=self.todos,
+            sandbox=self.sandbox,
+            subagent=self._subagent,
+        )
+        self.system = SYSTEM_PROMPT.format(
+            workspace=self.toolbox.workspace,
+            os=platform.system(),
+            shell=self.toolbox.shell_name,
+            skills=skills_prompt(self.skills),
+        )
         self.messages: list[dict] = []
         self.summary = ""
         self._recent_calls: list[tuple[str, str, str]] = []
@@ -87,16 +104,23 @@ class Agent:
         # a process start, about 100 ms on Windows.
         if not self._git_fresh:
             self._git, self._git_fresh = git_summary(self.toolbox.workspace), True
-        return build_reminder(workspace=self.toolbox.workspace, todos=self.todos, seen=self.toolbox.seen,
-                              today=self.today(), git=self._git)
+        return build_reminder(
+            workspace=self.toolbox.workspace,
+            todos=self.todos,
+            seen=self.toolbox.seen,
+            today=self.today(),
+            git=self._git,
+        )
 
     def overhead_tokens(self) -> int:
         """What every request carries besides the transcript: the system prompt,
         the tool schemas (about 900 tokens, more than a short transcript) and
         the reminder. Leaving these out would let the real prompt pass num_ctx
         before compaction ever triggers."""
-        return (estimate_tokens([self.system_message(), {"role": "user", "content": self.reminder()}])
-                + self._schema_tokens)
+        return (
+            estimate_tokens([self.system_message(), {"role": "user", "content": self.reminder()}])
+            + self._schema_tokens
+        )
 
     def prompt_room(self) -> int:
         """Tokens the prompt may use. The context holds the reply too; a prompt that
@@ -119,9 +143,15 @@ class Agent:
         self._recent_calls: list[tuple[str, str, str]] = []
         try:
             for _ in range(self.cfg.max_steps):
-                self._git_fresh = False  # the last step's commands may have committed or switched branch
+                self._git_fresh = (
+                    False  # the last step's commands may have committed or switched branch
+                )
                 self._maybe_compact()
-                request = [self.system_message(), *self.messages, {"role": "user", "content": self.reminder()}]
+                request = [
+                    self.system_message(),
+                    *self.messages,
+                    {"role": "user", "content": self.reminder()},
+                ]
                 self._forget_deleted_files()
                 reply = self.llm.chat(request, self.toolbox.schemas())
                 self.on_event("usage", reply.usage)
@@ -148,14 +178,22 @@ class Agent:
                 self.on_event("tool_call", c)
                 result = self._note_repeats(c, self.toolbox.call(c.name, c.arguments))
                 self.on_event("tool_result", (c.name, result))
-                self.messages.append({"role": "tool", "tool_call_id": c.id, "name": c.name, "content": result})
+                self.messages.append(
+                    {"role": "tool", "tool_call_id": c.id, "name": c.name, "content": result}
+                )
                 done += 1
         finally:
             # Ctrl-C mid-call must not leave a tool call without a result: hosted
             # APIs reject every later request whose history contains one.
             for c in calls[done:]:
-                self.messages.append({"role": "tool", "tool_call_id": c.id, "name": c.name,
-                                      "content": "error: interrupted by the user before this call finished"})
+                self.messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": c.id,
+                        "name": c.name,
+                        "content": "error: interrupted by the user before this call finished",
+                    }
+                )
 
     def _note_repeats(self, c, result: str) -> str:
         """Small models get stuck repeating one call. Say so in the result, where
@@ -168,8 +206,10 @@ class Agent:
                 break
             run += 1
         if run >= REPEAT_WARNING:
-            result += (f"\n[harness: this exact call has returned this exact result {run} times in a row. "
-                       "Repeating it will not change anything; try something different or answer.]")
+            result += (
+                f"\n[harness: this exact call has returned this exact result {run} times in a row. "
+                "Repeating it will not change anything; try something different or answer.]"
+            )
         return result
 
     def reset(self) -> None:
@@ -179,8 +219,14 @@ class Agent:
         self.toolbox.seen.clear()
 
     def _subagent(self, prompt: str) -> str:
-        return run_subagent(prompt, llm=self.llm, toolbox=self.toolbox, max_steps=self.cfg.subagent_max_steps,
-                            context_limit=self.prompt_room(), on_event=self.on_event)
+        return run_subagent(
+            prompt,
+            llm=self.llm,
+            toolbox=self.toolbox,
+            max_steps=self.cfg.subagent_max_steps,
+            context_limit=self.prompt_room(),
+            on_event=self.on_event,
+        )
 
     def _trim_old_tool_outputs(self) -> None:
         """A finished turn's tool outputs are rarely needed again and are the
@@ -189,7 +235,9 @@ class Agent:
         for m in self.messages:
             text = m.get("content") or ""
             if m["role"] == "tool" and len(text) > STRIPPED_KEEP and not m.get("trimmed"):
-                m["content"] = text[:STRIPPED_KEEP] + f"\n[rest of this output ({len(text)} characters) removed after its turn ended]"
+                size = len(text)
+                note = f"[rest of this output ({size} characters) removed after its turn ended]"
+                m["content"] = f"{text[:STRIPPED_KEEP]}\n{note}"
                 m["trimmed"] = True
 
     def _forget_deleted_files(self) -> None:
@@ -205,9 +253,11 @@ class Agent:
         overhead = self.overhead_tokens()
         if overhead > self.prompt_budget():
             raise ContextOverflow(
-                f"the harness's own context (system prompt, skills, tool schemas, handoff note, todo list: "
-                f"~{overhead} tokens) leaves no room in the {self.prompt_room()} tokens available. /clear "
-                "resets the note and the todos; fewer or shorter skills, or a larger HARNESS_NUM_CTX, also help.")
+                "the harness's own context (system prompt, skills, tool schemas, handoff note, "
+                f"todo list: ~{overhead} tokens) leaves no room in the {self.prompt_room()} "
+                "tokens available. /clear resets the note and the todos; fewer or shorter skills, "
+                "or a larger HARNESS_NUM_CTX, also help."
+            )
         self._compact_old_turns()
         self._squeeze_current_turn()
 
@@ -224,9 +274,14 @@ class Agent:
             text = m.get("content") or ""
             if len(text) > STRIPPED_KEEP:
                 before = estimate_tokens([m])
-                m["content"] = text[:STRIPPED_KEEP] + f"\n[rest of this output ({len(text)} characters) removed to fit the context]"
+                m["content"] = (
+                    text[:STRIPPED_KEEP]
+                    + f"\n[rest of this output ({len(text)} characters) removed to fit the context]"
+                )
                 m["trimmed"] = True
-                tokens -= before - estimate_tokens([m])  # one message re-measured, not the whole request
+                tokens -= before - estimate_tokens(
+                    [m]
+                )  # one message re-measured, not the whole request
                 if tokens <= budget:
                     break
         if tokens > budget:
@@ -237,8 +292,8 @@ class Agent:
                     args = tc["function"]["arguments"]
                     if len(args) > STRIPPED_KEEP:
                         before = estimate_tokens([m])
-                        tc["function"]["arguments"] = json.dumps(
-                            {"_note": f"arguments ({len(args)} characters) removed to fit the context"})
+                        note = f"arguments ({len(args)} characters) removed to fit the context"
+                        tc["function"]["arguments"] = json.dumps({"_note": note})
                         tokens -= before - estimate_tokens([m])
                 if tokens <= budget:
                     break
@@ -248,10 +303,12 @@ class Agent:
             # Sending it anyway would let Ollama silently drop the start of the
             # prompt, system prompt included; better to stop and say so.
             raise ContextOverflow(
-                f"the request (~{tokens} tokens) does not fit the {self.prompt_room()} tokens the {self.cfg.context_limit}-token "
-                f"context leaves beside a {self.cfg.max_output_tokens}-token reply, even after "
-                "compacting and trimming; the current message is too large. Start over with /clear, send less at "
-                "once, or raise HARNESS_NUM_CTX.")
+                f"the request (~{tokens} tokens) does not fit the {self.prompt_room()} tokens "
+                f"the {self.cfg.context_limit}-token context leaves beside a "
+                f"{self.cfg.max_output_tokens}-token reply, even after compacting and trimming; "
+                "the current message is too large. Start over with /clear, send less at once, "
+                "or raise HARNESS_NUM_CTX."
+            )
 
     def _compact_old_turns(self) -> None:
         limit = self.cfg.context_limit
@@ -259,13 +316,19 @@ class Agent:
             return
         before, count = self.context_tokens(), len(self.messages)
         self.summary, self.messages = compact(
-            self.messages, self.summary, self.llm,
+            self.messages,
+            self.summary,
+            self.llm,
             # compact_to is a share of the whole prompt, so the fixed overhead
             # comes out of it before deciding how much transcript to keep.
-            keep_tokens=max(MIN_KEEP_TOKENS, int(self.cfg.compact_to * limit) - self.overhead_tokens()),
+            keep_tokens=max(
+                MIN_KEEP_TOKENS, int(self.cfg.compact_to * limit) - self.overhead_tokens()
+            ),
             # The summarising request must fit beside its reply too: what is left
             # after the previous note and the instructions goes to the transcript.
-            budget_tokens=max(MIN_KEEP_TOKENS, self.prompt_room() - text_tokens(self.summary) - COMPACT_OVERHEAD),
+            budget_tokens=max(
+                MIN_KEEP_TOKENS, self.prompt_room() - text_tokens(self.summary) - COMPACT_OVERHEAD
+            ),
             max_summary_tokens=int(limit * SUMMARY_SHARE),
         )
         # Nothing droppable (one oversized message) leaves the transcript as it was.

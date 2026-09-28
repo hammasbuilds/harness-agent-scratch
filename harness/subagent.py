@@ -13,7 +13,7 @@ FINISH_AT it must answer with what it has.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from .compaction import estimate_tokens
 from .llm import LLM
@@ -30,8 +30,10 @@ change files or run commands that change anything. Finish with a concise,
 specific answer: paths, names, line numbers, and anything the caller should know.
 Your final message is all the caller sees."""
 
-OUT_OF_ROOM = ("<system-reminder>Your context is nearly full. Stop exploring and answer now "
-               "with what you have found; say what you could not check.</system-reminder>")
+OUT_OF_ROOM = (
+    "<system-reminder>Your context is nearly full. Stop exploring and answer now "
+    "with what you have found; say what you could not check.</system-reminder>"
+)
 
 
 def _trim_older_outputs(messages: list[dict]) -> None:
@@ -39,12 +41,42 @@ def _trim_older_outputs(messages: list[dict]) -> None:
     for m in tool_msgs[:-1]:
         text = m.get("content") or ""
         if len(text) > TRIM_KEEP and not m.get("trimmed"):
-            m["content"] = text[:TRIM_KEEP] + f"\n[rest of this output ({len(text)} characters) removed to save room]"
+            m["content"] = (
+                text[:TRIM_KEEP]
+                + f"\n[rest of this output ({len(text)} characters) removed to save room]"
+            )
             m["trimmed"] = True
 
 
-def run_subagent(prompt: str, *, llm: LLM, toolbox: Toolbox, max_steps: int, context_limit: int,
-                 on_event: Callable[[str, object], None] = lambda kind, data: None) -> str:
+def run_subagent(
+    prompt: str,
+    *,
+    llm: LLM,
+    toolbox: Toolbox,
+    max_steps: int,
+    context_limit: int,
+    on_event: Callable[[str, object], None] = lambda kind, data: None,
+) -> str:
+    """Run the sub-loop. `subagent_end` follows `subagent_start` however the
+    loop ends, a model call that raises included, so a front end never shows a
+    subagent as still running; its data is the answer, or None without one."""
+    on_event("subagent_start", prompt)
+    answer = None
+    try:
+        answer = _explore(prompt, llm, toolbox, max_steps, context_limit, on_event)
+        return answer
+    finally:
+        on_event("subagent_end", answer)
+
+
+def _explore(
+    prompt: str,
+    llm: LLM,
+    toolbox: Toolbox,
+    max_steps: int,
+    context_limit: int,
+    on_event: Callable[[str, object], None],
+) -> str:
     box = toolbox if toolbox.read_only else toolbox.read_only_copy()
     messages: list[dict] = [
         {"role": "system", "content": SUBAGENT_SYSTEM.format(workspace=box.workspace)},
@@ -52,7 +84,6 @@ def run_subagent(prompt: str, *, llm: LLM, toolbox: Toolbox, max_steps: int, con
     ]
     schemas = box.schemas(SUBAGENT_TOOLS)
     schema_tokens = estimate_tokens(schemas)
-    on_event("subagent_start", prompt)
     for _ in range(max_steps):
         if schema_tokens + estimate_tokens(messages) > TRIM_AT * context_limit:
             _trim_older_outputs(messages)
@@ -61,27 +92,31 @@ def run_subagent(prompt: str, *, llm: LLM, toolbox: Toolbox, max_steps: int, con
             if estimate_tokens(final) > context_limit:
                 # Even the answer-now request would not fit (a huge prompt, say);
                 # Ollama would cut it silently, so do not send it.
-                on_event("subagent_end", None)
-                return ("(the subagent could not continue: its context is full even after trimming; "
-                        "give it a shorter, more specific prompt)")
+                return (
+                    "(the subagent could not continue: its context is full even after trimming; "
+                    "give it a shorter, more specific prompt)"
+                )
             reply = llm.chat(final, None)
-            return _finish(reply.content, on_event, reply.truncated)
+            return _answer(reply.content, reply.truncated)
         reply = llm.chat(messages, schemas)
         messages.append(reply.to_message())
         if not reply.tool_calls:
-            return _finish(reply.content, on_event, reply.truncated)
+            return _answer(reply.content, reply.truncated)
         for c in reply.tool_calls:
             on_event("subagent_tool_call", c)
-            result = (box.call(c.name, c.arguments) if c.name in SUBAGENT_TOOLS
-                      else f"error: {c.name} is not available to subagents; you can only read")
-            messages.append({"role": "tool", "tool_call_id": c.id, "name": c.name, "content": result})
-    on_event("subagent_end", None)
+            result = (
+                box.call(c.name, c.arguments)
+                if c.name in SUBAGENT_TOOLS
+                else f"error: {c.name} is not available to subagents; you can only read"
+            )
+            messages.append(
+                {"role": "tool", "tool_call_id": c.id, "name": c.name, "content": result}
+            )
     return f"(the subagent stopped after {max_steps} steps without a final answer)"
 
 
-def _finish(content: str, on_event, truncated: bool = False) -> str:
+def _answer(content: str, truncated: bool = False) -> str:
     answer = content.strip() or "(the subagent returned no text)"
     if truncated:  # otherwise a cut-off answer reaches the main agent looking complete
         answer += "\n[the subagent's answer was cut off at the model's output limit]"
-    on_event("subagent_end", answer)
     return answer
