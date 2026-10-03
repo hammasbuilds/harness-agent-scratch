@@ -39,7 +39,7 @@ from .agent import Agent
 from .bench_tasks import TASKS, Task, setup
 from .compaction import estimate_tokens
 from .config import Config
-from .llm import LLM, LLMError, Reply, ToolCall, make_llm
+from .llm import LLM, LLMError, Reply, ToolCall, extract_inline_tool_calls, make_llm
 from .sandbox import Sandbox
 
 MODELS = ("qwen2.5:7b-instruct", "qwen2.5:14b-instruct", "qwen2.5-coder:14b")
@@ -121,6 +121,17 @@ class CachedLLM:
         if path.is_file():
             stored = json.loads(path.read_text(encoding="utf-8"))
             reply, seconds, hit = _reply_from_json(stored["reply"]), stored["seconds"], True
+            # The cache holds replies as the backend parsed them at the time. Re-run
+            # the text fallback so a parser fix also reaches replies cached before it.
+            if not reply.tool_calls and tools:
+                names = {t["function"]["name"] for t in tools}
+                calls = extract_inline_tool_calls(reply.content, names)
+                if calls:
+                    for j, c in enumerate(calls):
+                        c.id = f"call_{len(self.calls)}_{j}"
+                    reply = Reply(
+                        content="", tool_calls=calls, usage=reply.usage, truncated=reply.truncated
+                    )
         else:
             start = time.monotonic()
             reply = self.inner.chat(messages, tools)

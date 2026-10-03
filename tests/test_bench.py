@@ -256,3 +256,25 @@ def test_run_models_sh_rejects_unknown_arguments():
         timeout=60,
     )
     assert out.returncode == 2 and "usage" in out.stderr
+
+
+def test_a_cached_reply_goes_through_the_current_inline_call_parser(tmp_path):
+    # A reply cached as plain text by an older parser must not stay plain text
+    # once the parser learns to read it: the fix has to reach the cache too.
+    from harness.llm import Reply
+
+    class Never:
+        def chat(self, messages, tools):
+            raise AssertionError("served from the cache")
+
+    llm = bench.CachedLLM(Never(), tmp_path, "m", {})
+    msgs = [{"role": "user", "content": "make a.txt"}]
+    tools = [{"type": "function", "function": {"name": "write_file", "parameters": {}}}]
+    text = '```json\n{"name": "write_file", "arguments": {"path": "a.txt", "content": "1"}}\n```'
+    key = bench.request_key("m", msgs, tools, {})
+    path = tmp_path / key[:2] / f"{key}.json"
+    path.parent.mkdir(parents=True)
+    stored = {"reply": bench._reply_to_json(Reply(content=text)), "seconds": 1.0, "model": "m"}
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    reply = llm.chat(msgs, tools)
+    assert [c.name for c in reply.tool_calls] == ["write_file"] and reply.content == ""

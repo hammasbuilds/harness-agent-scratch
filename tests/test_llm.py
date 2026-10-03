@@ -207,6 +207,29 @@ def test_prose_and_unknown_tools_are_not_calls(content):
     assert extract_inline_tool_calls(content, {"bash"}) == []
 
 
+def test_several_fenced_calls_in_a_row_are_all_recovered():
+    # qwen2.5-coder:14b's reply on the three_files bench task, shortened
+    content = (
+        '```json\n{"name": "write_file", "arguments": {"path": "a.txt", "content": "1"}}\n```\n\n'
+        '```json\n{"name": "write_file", "arguments": {"path": "b.txt", "content": "2"}}\n```'
+    )
+    calls = extract_inline_tool_calls(content, {"write_file"})
+    assert [json.loads(c.arguments)["path"] for c in calls] == ["a.txt", "b.txt"]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        # prose beside fenced blocks: still an example, never run
+        'Let me fix it.\n```json\n{"name": "bash", "arguments": {"command": "ls"}}\n```',
+        # one block is not a call, so none of them are
+        '```json\n{"name": "bash", "arguments": {"command": "ls"}}\n```\n```\nls -la\n```',
+    ],
+)
+def test_fenced_calls_with_prose_or_a_non_call_block_are_not_calls(content):
+    assert extract_inline_tool_calls(content, {"bash"}) == []
+
+
 def test_backend_uses_inline_fallback_only_when_tools_were_offered(tmp_path):
     text = '{"name": "bash", "arguments": {"command": "ls"}}'
     backend = OllamaBackend(cfg(tmp_path), FakePost({"message": {"content": text}}))

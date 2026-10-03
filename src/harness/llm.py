@@ -263,10 +263,14 @@ def extract_inline_tool_calls(content: str, known: set[str]) -> list[ToolCall]:
         return []  # <tool_call> blocks inside prose are quoted examples, not calls
     if not candidates:
         text = content.strip()
-        fenced = _FENCED.fullmatch(text)
-        if fenced:
-            text = fenced.group(1)
-        if text.startswith("{") and text.endswith("}"):
+        blocks = _FENCED.findall(text)
+        if blocks and not _FENCED.sub("", text).strip():
+            # one or more fenced blocks and nothing else (qwen2.5-coder writes
+            # several in a row); prose beside them still makes them examples
+            candidates = [b for b in blocks if b.startswith("{") and b.endswith("}")]
+            if len(candidates) != len(blocks):
+                candidates = []
+        elif text.startswith("{") and text.endswith("}"):
             candidates = [text]
     calls = []
     for i, text in enumerate(candidates):

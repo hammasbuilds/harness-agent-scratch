@@ -7,7 +7,7 @@
   <a href="#build-steps">Build steps</a> &middot;
   <a href="#input--output">Input / Output</a> &middot;
   <a href="#quick-start">Quick start</a> &middot;
-  <a href="#model-arm-queued-for-the-gpu">Model arm</a> &middot;
+  <a href="#model-arm-three-local-models-over-14-tasks">Model arm</a> &middot;
   <a href="#layout">Layout</a> &middot;
   <a href="#requirements">Requirements</a> &middot;
   <a href="#tests">Tests</a> &middot;
@@ -64,7 +64,8 @@ asserts that each request starts with the previous one.
 ## Findings
 
 Both studies run on the CPU with committed code; neither runs a model. The model-in-the-loop
-numbers (pass rate, steps, prefix-cache reuse) are [queued for the GPU](#model-arm-queued-for-the-gpu).
+numbers are in the [model arm](#model-arm-three-local-models-over-14-tasks): `qwen2.5:14b-instruct`
+passes 11 of 14 coding tasks, `qwen2.5-coder:14b` and `qwen2.5:7b-instruct` 8 each.
 
 | Question | Result | n | Source |
 |---|---|---|---|
@@ -113,7 +114,7 @@ What the numbers say, and do not:
 | 10 | [Compaction](src/harness/compaction.py) | 28 | Counts everything sent (system prompt, tool schemas, reminder, transcript) with the estimator [calibrated above](#findings), and keeps room for the reply. At 85% of the limit, finished turns become a model-written handoff note capped at 10% of the context; if the current turn alone is too big, its tool outputs are cut, oldest first. |
 | 11 | [Subagents](src/harness/subagent.py) | ↑ | `task` starts a fresh context with its own read-only toolbox: commands that would need a yes are refused, never asked. Its budget forces an answer before it overflows. Only its final answer returns; its start and end are always reported, even when its model call fails. One level deep. |
 | 12 | [CLI](src/harness/cli.py) + [config](src/harness/config.py) | 56 | `harness` REPL or `harness -p "task"`. A missing workspace or an empty task exits 2 before any model is contacted. Settings from flags, the environment, `~/.config/harness/.env`, then the project's `.env`, which may set only temperature and compaction thresholds. The reply reservation defaults to 2,048 tokens or a quarter of a smaller context. |
-| 13 | [Model arm](src/harness/bench.py) + [tasks](src/harness/bench_tasks.py) | 26 | 14 checkable coding tasks, a disk cache of generations, a result writer; tested against a fake Ollama. [Queued](#model-arm-queued-for-the-gpu), not run. |
+| 13 | [Model arm](src/harness/bench.py) + [tasks](src/harness/bench_tasks.py) | 26 | 14 checkable coding tasks, a disk cache of generations, a result writer; tested against a fake Ollama. [Run](#model-arm-three-local-models-over-14-tasks) on three local models. |
 
 `↑` = covered by the test file of the row above. The studies, samples and packaging have 17 more.
 
@@ -306,32 +307,62 @@ uv run --group calibrate python scripts/calibrate_tokens.py   # needs the tokeni
 uv run python scripts/permission_study.py
 ```
 
-## Model arm (queued for the GPU)
+## Model arm: three local models over 14 tasks
 
-Built and tested, not run: the GPU belongs to a training job. [`scripts/run_models.sh`](scripts/run_models.sh)
-checks free RAM, that no other process holds the GPU and that it has 14 GB free, and that Ollama
-answers with every model pulled; then it runs [`harness.bench`](src/harness/bench.py) for
-`qwen2.5:7b-instruct`, `qwen2.5:14b-instruct` and `qwen2.5-coder:14b` over
-[14 tasks](src/harness/bench_tasks.py) (fix an off-by-one, rename a function across files, add a
-flag, edit one line of 400, keep CRLF endings, write a test that must fail on a broken function,
-answer a question about the code, ...). Each task has a check that runs the result, and a
-reference solution that the tests apply to prove the check passes on a right answer and fails on
-the starting files.
+[`scripts/run_models.sh`](scripts/run_models.sh) checks free RAM, that no other process holds the
+GPU and that it has 14 GB free, and that Ollama answers with every model pulled; then it runs
+[`harness.bench`](src/harness/bench.py) for `qwen2.5:7b-instruct`, `qwen2.5:14b-instruct` and
+`qwen2.5-coder:14b` over [14 tasks](src/harness/bench_tasks.py) (fix an off-by-one, rename a
+function across files, add a flag, edit one line of 400, keep CRLF endings, write a test that must
+fail on a broken function, answer a question about the code, ...). Each task has a check that runs
+the result, and a reference solution that the tests apply to prove the check passes on a right
+answer and fails on the starting files.
 
-```text
-$ bash scripts/run_models.sh --dry-run
-job  qwen2.5:7b-instruct      create_fib
-job  qwen2.5:7b-instruct      fix_off_by_one
-...
-job  qwen2.5-coder:14b        count_rows
-42 jobs (3 models x 14 tasks); about 252 model calls (at least 42; the main loop stops at 840, plus any compaction and subagent calls)
-```
+Run on one Quadro RTX 5000 (16 GB), Ollama Q4 weights, temperature 0, 8,192-token context, at most
+20 steps per task. One deterministic run per model, so 14 tasks give wide intervals:
+
+| model | passed | 95% interval (Wilson) | model calls | model time |
+|---|---|---|---|---|
+| `qwen2.5:14b-instruct` | **11 / 14** | 52-92% | 47 | 282 s |
+| `qwen2.5-coder:14b` | 8 / 14 | 33-79% | 47 | 261 s |
+| `qwen2.5:7b-instruct` | 8 / 14 | 33-79% | 53 | 168 s |
+
+| task | 14b-instruct | coder-14b | 7b-instruct |
+|---|---|---|---|
+| create_fib, json_config_edit, crlf_edit, edit_line_350, three_files, count_rows | pass | pass | pass |
+| fix_off_by_one, fix_slugify | pass | fail | fail |
+| rename_function, find_the_raiser | pass | fail | pass |
+| write_a_test | pass | pass | fail |
+| sort_by_count | fail | pass | fail |
+| add_verbose_flag, fix_import | fail | fail | fail |
+
+The failures are the models', and they are of a few kinds: a file written with literal `
+`
+escapes instead of line breaks (a `SyntaxError` on the first run), an edit that references a
+variable it never defined, a fix to the wrong function, and one refusal ("I can't help with that")
+after thirteen calls.
+
+The first run of this arm found three bugs on the harness side, all fixed and tested before the
+numbers above:
+
+- **The run script never put the model on the GPU.** The harness defaults to `num_gpu=0` (CPU, so
+  it can share a machine with training) and `run_models.sh` did not override it. It now passes
+  `--num-gpu 99`. Its RAM check also read nothing on Git Bash, whose `/proc/meminfo` has no
+  `MemAvailable`, and refused to start.
+- **`qwen2.5-coder:14b` writes tool calls as text.** Ollama returns its calls as several fenced
+  JSON blocks in the reply instead of in `tool_calls`, so the harness treated them as a final
+  answer. A reply made of nothing but such blocks is now read as calls; a block next to prose is
+  still treated as a quoted example and never run. The cache re-parses stored replies, so the fix
+  reaches generations cached before it.
+- **The `write_a_test` check rejected correct tests.** It required the word `assert`; both 14B
+  models wrote a script that compares results and exits non-zero instead. The check is now
+  behavioural only: the test must pass on the real `is_even` and fail on a broken one.
 
 Every generation is cached on disk under a hash of (model, request, generation options), with
 call ids renumbered by position and a fixed date, so a rerun sends byte-identical requests and an
-interrupted run resumes without paying again. `results/model_runs/<model>.json` will hold the pass
-rate with a Wilson interval, steps, wall and model time, and the share of each prompt Ollama's
-prefix cache skipped (from `prompt_eval_count`, calibrated per task on its first call).
+interrupted run resumes without paying again. `results/model_runs/<model>.json` holds the pass
+rate with its interval, per-task rows, steps, model time, and the share of each prompt Ollama's
+prefix cache skipped.
 
 ## Layout
 
@@ -389,8 +420,8 @@ fail if the committed results or the README's numbers no longer match the code.
 
 ## What this repo does NOT do
 
-- **No live model run yet.** Whether a Qwen2.5 model finishes the 14 tasks, in how many steps, and
-  how much of each prompt Ollama's prefix cache reuses, is unmeasured until the GPU run.
+- **One run, 14 tasks, three models.** Temperature 0 and one pass each: the intervals are wide
+  (11/14 is 52-92%), and no model larger than 14B or from another family has been run.
 - **No sandbox on Windows.** Permission prompts are the only guard there, and they are not
   security: `python -c "import shutil; shutil.rmtree(...)"` is just a command that asks.
 - **The Linux and macOS sandboxes are unit-tested for the command they build, not run.**

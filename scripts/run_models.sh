@@ -18,6 +18,7 @@ MIN_FREE_RAM_GB=${MIN_FREE_RAM_GB:-8}
 MIN_FREE_VRAM_MB=${MIN_FREE_VRAM_MB:-14000}   # qwen2.5 14B at Q4 with an 8k context
 NUM_CTX=${NUM_CTX:-8192}
 MAX_STEPS=${MAX_STEPS:-20}
+NUM_GPU=${NUM_GPU:-99}                      # layers on the GPU; the harness itself defaults to 0 (CPU)
 
 model_args=()
 for m in $MODELS; do model_args+=(--model "$m"); done
@@ -26,7 +27,7 @@ if [[ -n "${PYTHON:-}" ]]; then   # one interpreter path, which may contain spac
 else
     python=(uv run python)
 fi
-bench=("${python[@]}" -m harness.bench "${model_args[@]}" --num-ctx "$NUM_CTX" --max-steps "$MAX_STEPS")
+bench=("${python[@]}" -m harness.bench "${model_args[@]}" --num-ctx "$NUM_CTX" --max-steps "$MAX_STEPS" --num-gpu "$NUM_GPU")
 
 if [[ "${1:-}" == "--dry-run" ]]; then
     "${bench[@]}" --dry-run
@@ -38,7 +39,8 @@ if [[ $# -gt 0 ]]; then
 fi
 
 free_ram_gb() {
-    if [[ -r /proc/meminfo ]]; then
+    # Git Bash ships a /proc/meminfo without MemAvailable, so only Linux takes this branch
+    if [[ -r /proc/meminfo ]] && grep -q '^MemAvailable' /proc/meminfo; then
         awk '/MemAvailable/ {printf "%d", $2 / 1048576}' /proc/meminfo
     else
         powershell -NoProfile -Command \

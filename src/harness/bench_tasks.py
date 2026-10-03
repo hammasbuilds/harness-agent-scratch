@@ -201,8 +201,11 @@ def _wordcount(ws: Path, answer: str) -> tuple[bool, str]:
 
 def _test_written(ws: Path, answer: str) -> tuple[bool, str]:
     test = ws / "test_even.py"
-    if not test.is_file() or "assert" not in test.read_text(encoding="utf-8"):
-        return False, "test_even.py missing or has no assert"
+    # Judged by behaviour only: a script that checks and exits non-zero is a test
+    # whether or not it spells `assert` (two 14B models wrote exactly that and
+    # were once failed for it).
+    if not test.is_file():
+        return False, "test_even.py missing"
     code, out = run_py(ws, "test_even.py")
     if code != 0:
         return False, f"the new test fails: {out[-200:]}"
