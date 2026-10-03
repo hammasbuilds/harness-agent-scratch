@@ -22,11 +22,12 @@ dev = ["pytest>=7", "ruff==0.16.7"]
 calibrate = ["tokenizers>=0.20"]
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["harness*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src", "."]  # "." for scripts/, which tests import
 
 [tool.ruff]
 line-length = 100

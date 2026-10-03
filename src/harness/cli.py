@@ -14,6 +14,7 @@ from .sandbox import SandboxUnavailable
 from .tools import printable
 
 RESULT_PREVIEW = 400
+SUBAGENT_PREVIEW = 160
 
 EPILOG = """\
 settings, strongest first: these flags, HARNESS_* environment variables,
@@ -44,8 +45,10 @@ def _ansi(code: str, s: str) -> str:
 
 
 class Printer:
-    def __init__(self, stream=sys.stdout):
-        self.out = stream
+    def __init__(self, stream=None):
+        # Looked up now, not when the module was imported: a default of
+        # sys.stdout would keep writing to the stream of that moment.
+        self.out = stream = stream or sys.stdout
         color = stream.isatty() and "NO_COLOR" not in os.environ
         if color and os.name == "nt":
             os.system("")  # turns on ANSI escape handling in the Windows console
@@ -64,6 +67,13 @@ class Printer:
             self._show("36", f"> {data.name} {data.arguments}")
         elif kind == "subagent_tool_call":
             self._show("36", f"  [subagent] > {data.name} {data.arguments}")
+        elif kind == "subagent_tool_result":
+            # One line: the subagent's reading is its own business, but a refusal
+            # or an error should be visible.
+            _, result = data
+            first = result.split("\n", 1)[0]
+            more = f" ... ({len(result)} chars)" if len(first) < len(result) else ""
+            self._show("2", f"  [subagent]   {first[:SUBAGENT_PREVIEW]}{more}")
         elif kind == "tool_result":
             _, result = data
             shown = result

@@ -69,16 +69,17 @@ def _letter_tokens(run: str) -> int:
 def text_tokens(text: str) -> int:
     """A pessimistic token count, shaped like BPE pre-tokenisation.
 
-    Calibrated against the Qwen2.5 tokenizer on 34 kinds of text (prose, code,
-    JSON, CSV, `seq` output, hashes, base64, base32, paths, DNA and protein
-    sequences, random letters in either case, long words, CJK, Cyrillic, Hindi,
-    Georgian, Thai, Amharic, Hebrew and Arabic, math symbols, Braille spinners,
-    emoji): on every one the real count was at most 0.92 of the estimate, which
-    is about 1.7x the real count on average. Underestimating is the failure that matters,
+    Calibrated against the Qwen2.5 tokenizer by scripts/calibrate_tokens.py
+    (prose, code, diffs, JSON, CSV, `seq` output, listings, hashes, base64,
+    base32, paths, DNA and protein sequences, random letters, long words, ten
+    scripts from CJK to Amharic, math symbols, box drawing, Braille spinners,
+    emoji); results/token_estimate_calibration.json has the per-kind ratios.
+    On every sample the real count was at most 0.92 of the estimate, and 0.63
+    of it on average. Underestimating is the failure that matters,
     since Ollama silently drops the start of an overlong prompt; overestimating
-    only compacts sooner. The flat "characters / 3" this replaced was 3x too low
-    on digits (Qwen makes every digit a token) and 2x on JSON; the version before
-    this one was 2x too low on single-case random letters such as DNA.
+    only compacts sooner. The flat "characters / 3" this replaced was too low on
+    28 of the 36 kinds: 3x on digits (Qwen makes every digit a token), 4x on
+    Amharic. The version before this one was 2x too low on DNA.
     """
     n = 0
     for m in _RUN.finditer(text):

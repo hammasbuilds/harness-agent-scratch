@@ -7,3 +7,6 @@ dist/
 .pytest_cache/
 .env
 .harness/
+data/
+.bench-cache/
+runs/

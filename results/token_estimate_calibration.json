@@ -1,0 +1,1881 @@
+{
+  "what": "real Qwen2.5 token count / harness estimate (text_tokens) per 3,000-character sample; above 1.0 means the estimate was too low",
+  "tokenizer": {
+    "repo": "Qwen/Qwen2.5-7B-Instruct",
+    "revision": "a09a35458c702b33eeacc393d103063234e8bc28",
+    "file": "tokenizer.json",
+    "git_blob_sha1": "443909a61d429dff23010e5bddd28ff530edda00"
+  },
+  "corpus": {
+    "kinds": 36,
+    "samples_per_kind": 5,
+    "samples": 180,
+    "chars_per_sample": 3000,
+    "real_text_from_commit": "83723b2344f664a8edf8a0180a8fe4265a837bee"
+  },
+  "bootstrap": {
+    "resampled_unit": "kind",
+    "replicates": 10000,
+    "seed": 0
+  },
+  "harness_estimate": {
+    "max_ratio": 0.9191,
+    "max_ratio_kind": "base32",
+    "mean_ratio_over_kinds": 0.6348,
+    "mean_ratio_ci95": [
+      0.5737,
+      0.6942
+    ],
+    "samples_underestimated": 0,
+    "kinds_underestimated": 0
+  },
+  "baseline_chars_div_3": {
+    "max_ratio": 3.989,
+    "max_ratio_kind": "lang_amharic",
+    "mean_ratio_over_kinds": 1.7929,
+    "mean_ratio_ci95": [
+      1.5291,
+      2.0694
+    ],
+    "samples_underestimated": 136,
+    "kinds_underestimated": 28
+  },
+  "kinds": {
+    "prose_readme": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 879.8,
+      "estimate_mean": 1395.6,
+      "ratio_mean": 0.6305,
+      "ratio_max": 0.643,
+      "baseline_ratio_max": 0.906,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 847,
+          "estimate": 1379,
+          "ratio": 0.6142,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.847
+        },
+        {
+          "chars": 3000,
+          "real": 882,
+          "estimate": 1408,
+          "ratio": 0.6264,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.882
+        },
+        {
+          "chars": 3000,
+          "real": 906,
+          "estimate": 1409,
+          "ratio": 0.643,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.906
+        },
+        {
+          "chars": 3000,
+          "real": 905,
+          "estimate": 1445,
+          "ratio": 0.6263,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.905
+        },
+        {
+          "chars": 3000,
+          "real": 859,
+          "estimate": 1337,
+          "ratio": 0.6425,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.859
+        }
+      ]
+    },
+    "python_code": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 720.4,
+      "estimate_mean": 1295.6,
+      "ratio_mean": 0.556,
+      "ratio_max": 0.5989,
+      "baseline_ratio_max": 0.884,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 884,
+          "estimate": 1516,
+          "ratio": 0.5831,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.884
+        },
+        {
+          "chars": 3000,
+          "real": 675,
+          "estimate": 1127,
+          "ratio": 0.5989,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.675
+        },
+        {
+          "chars": 3000,
+          "real": 664,
+          "estimate": 1269,
+          "ratio": 0.5232,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.664
+        },
+        {
+          "chars": 3000,
+          "real": 690,
+          "estimate": 1269,
+          "ratio": 0.5437,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.69
+        },
+        {
+          "chars": 3000,
+          "real": 689,
+          "estimate": 1297,
+          "ratio": 0.5312,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.689
+        }
+      ]
+    },
+    "markdown_table": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 803.4,
+      "estimate_mean": 1336.6,
+      "ratio_mean": 0.601,
+      "ratio_max": 0.6131,
+      "baseline_ratio_max": 0.835,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 835,
+          "estimate": 1362,
+          "ratio": 0.6131,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.835
+        },
+        {
+          "chars": 3000,
+          "real": 802,
+          "estimate": 1340,
+          "ratio": 0.5985,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.802
+        },
+        {
+          "chars": 3000,
+          "real": 810,
+          "estimate": 1348,
+          "ratio": 0.6009,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.81
+        },
+        {
+          "chars": 3000,
+          "real": 790,
+          "estimate": 1336,
+          "ratio": 0.5913,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.79
+        },
+        {
+          "chars": 3000,
+          "real": 780,
+          "estimate": 1297,
+          "ratio": 0.6014,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.78
+        }
+      ]
+    },
+    "unified_diff": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 749.6,
+      "estimate_mean": 1339.0,
+      "ratio_mean": 0.5588,
+      "ratio_max": 0.5807,
+      "baseline_ratio_max": 0.921,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 921,
+          "estimate": 1590,
+          "ratio": 0.5792,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.921
+        },
+        {
+          "chars": 3000,
+          "real": 723,
+          "estimate": 1245,
+          "ratio": 0.5807,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.723
+        },
+        {
+          "chars": 3000,
+          "real": 689,
+          "estimate": 1257,
+          "ratio": 0.5481,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.689
+        },
+        {
+          "chars": 3000,
+          "real": 753,
+          "estimate": 1348,
+          "ratio": 0.5586,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.753
+        },
+        {
+          "chars": 3000,
+          "real": 662,
+          "estimate": 1255,
+          "ratio": 0.5275,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.662
+        }
+      ]
+    },
+    "json_records": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1282.4,
+      "estimate_mean": 1716.2,
+      "ratio_mean": 0.7473,
+      "ratio_max": 0.7483,
+      "baseline_ratio_max": 1.287,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1287,
+          "estimate": 1720,
+          "ratio": 0.7483,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.287
+        },
+        {
+          "chars": 3000,
+          "real": 1282,
+          "estimate": 1714,
+          "ratio": 0.748,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.282
+        },
+        {
+          "chars": 3000,
+          "real": 1278,
+          "estimate": 1713,
+          "ratio": 0.7461,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.278
+        },
+        {
+          "chars": 3000,
+          "real": 1280,
+          "estimate": 1713,
+          "ratio": 0.7472,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.28
+        },
+        {
+          "chars": 3000,
+          "real": 1285,
+          "estimate": 1721,
+          "ratio": 0.7467,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.285
+        }
+      ]
+    },
+    "html": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1481.2,
+      "estimate_mean": 2447.0,
+      "ratio_mean": 0.6053,
+      "ratio_max": 0.6056,
+      "baseline_ratio_max": 1.482,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1482,
+          "estimate": 2447,
+          "ratio": 0.6056,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.482
+        },
+        {
+          "chars": 3000,
+          "real": 1481,
+          "estimate": 2447,
+          "ratio": 0.6052,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.481
+        },
+        {
+          "chars": 3000,
+          "real": 1481,
+          "estimate": 2447,
+          "ratio": 0.6052,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.481
+        },
+        {
+          "chars": 3000,
+          "real": 1481,
+          "estimate": 2447,
+          "ratio": 0.6052,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.481
+        },
+        {
+          "chars": 3000,
+          "real": 1481,
+          "estimate": 2447,
+          "ratio": 0.6052,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.481
+        }
+      ]
+    },
+    "traceback": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 943.6,
+      "estimate_mean": 1489.2,
+      "ratio_mean": 0.6336,
+      "ratio_max": 0.6367,
+      "baseline_ratio_max": 0.946,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 939,
+          "estimate": 1485,
+          "ratio": 0.6323,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.939
+        },
+        {
+          "chars": 3000,
+          "real": 943,
+          "estimate": 1481,
+          "ratio": 0.6367,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.943
+        },
+        {
+          "chars": 3000,
+          "real": 946,
+          "estimate": 1492,
+          "ratio": 0.634,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.946
+        },
+        {
+          "chars": 3000,
+          "real": 945,
+          "estimate": 1497,
+          "ratio": 0.6313,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.945
+        },
+        {
+          "chars": 3000,
+          "real": 945,
+          "estimate": 1491,
+          "ratio": 0.6338,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.945
+        }
+      ]
+    },
+    "git_log_oneline": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 987.6,
+      "estimate_mean": 1495.6,
+      "ratio_mean": 0.6602,
+      "ratio_max": 0.6774,
+      "baseline_ratio_max": 1.05,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 952,
+          "estimate": 1468,
+          "ratio": 0.6485,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.952
+        },
+        {
+          "chars": 3000,
+          "real": 967,
+          "estimate": 1492,
+          "ratio": 0.6481,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.967
+        },
+        {
+          "chars": 3000,
+          "real": 971,
+          "estimate": 1456,
+          "ratio": 0.6669,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.971
+        },
+        {
+          "chars": 3000,
+          "real": 1050,
+          "estimate": 1550,
+          "ratio": 0.6774,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.05
+        },
+        {
+          "chars": 3000,
+          "real": 998,
+          "estimate": 1512,
+          "ratio": 0.6601,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.998
+        }
+      ]
+    },
+    "ls_la": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2091.0,
+      "estimate_mean": 2325.4,
+      "ratio_mean": 0.8992,
+      "ratio_max": 0.9042,
+      "baseline_ratio_max": 2.095,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2090,
+          "estimate": 2336,
+          "ratio": 0.8947,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.09
+        },
+        {
+          "chars": 3000,
+          "real": 2087,
+          "estimate": 2322,
+          "ratio": 0.8988,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.087
+        },
+        {
+          "chars": 3000,
+          "real": 2095,
+          "estimate": 2317,
+          "ratio": 0.9042,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.095
+        },
+        {
+          "chars": 3000,
+          "real": 2094,
+          "estimate": 2325,
+          "ratio": 0.9006,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.094
+        },
+        {
+          "chars": 3000,
+          "real": 2089,
+          "estimate": 2327,
+          "ratio": 0.8977,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.089
+        }
+      ]
+    },
+    "ls_la_pinned_in_tests": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2074.0,
+      "estimate_mean": 2260.0,
+      "ratio_mean": 0.9177,
+      "ratio_max": 0.9177,
+      "baseline_ratio_max": 2.074,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2074,
+          "estimate": 2260,
+          "ratio": 0.9177,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.074
+        },
+        {
+          "chars": 3000,
+          "real": 2074,
+          "estimate": 2260,
+          "ratio": 0.9177,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.074
+        },
+        {
+          "chars": 3000,
+          "real": 2074,
+          "estimate": 2260,
+          "ratio": 0.9177,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.074
+        },
+        {
+          "chars": 3000,
+          "real": 2074,
+          "estimate": 2260,
+          "ratio": 0.9177,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.074
+        },
+        {
+          "chars": 3000,
+          "real": 2074,
+          "estimate": 2260,
+          "ratio": 0.9177,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.074
+        }
+      ]
+    },
+    "seq_output": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 3000.0,
+      "estimate_mean": 3450.0,
+      "ratio_mean": 0.8696,
+      "ratio_max": 0.8696,
+      "baseline_ratio_max": 3.0,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        }
+      ]
+    },
+    "csv_numeric": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 3000.0,
+      "estimate_mean": 3450.0,
+      "ratio_mean": 0.8696,
+      "ratio_max": 0.8696,
+      "baseline_ratio_max": 3.0,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 3450,
+          "ratio": 0.8696,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        }
+      ]
+    },
+    "file_paths": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 916.0,
+      "estimate_mean": 1734.2,
+      "ratio_mean": 0.5282,
+      "ratio_max": 0.5324,
+      "baseline_ratio_max": 0.922,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 901,
+          "estimate": 1723,
+          "ratio": 0.5229,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.901
+        },
+        {
+          "chars": 3000,
+          "real": 921,
+          "estimate": 1730,
+          "ratio": 0.5324,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.921
+        },
+        {
+          "chars": 3000,
+          "real": 922,
+          "estimate": 1747,
+          "ratio": 0.5278,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.922
+        },
+        {
+          "chars": 3000,
+          "real": 921,
+          "estimate": 1751,
+          "ratio": 0.526,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.921
+        },
+        {
+          "chars": 3000,
+          "real": 915,
+          "estimate": 1720,
+          "ratio": 0.532,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.915
+        }
+      ]
+    },
+    "hex_sha256": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2647.8,
+      "estimate_mean": 3013.8,
+      "ratio_mean": 0.8786,
+      "ratio_max": 0.88,
+      "baseline_ratio_max": 2.67,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2670,
+          "estimate": 3035,
+          "ratio": 0.8797,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.67
+        },
+        {
+          "chars": 3000,
+          "real": 2640,
+          "estimate": 3000,
+          "ratio": 0.88,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.64
+        },
+        {
+          "chars": 3000,
+          "real": 2635,
+          "estimate": 3008,
+          "ratio": 0.876,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.635
+        },
+        {
+          "chars": 3000,
+          "real": 2654,
+          "estimate": 3016,
+          "ratio": 0.88,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.654
+        },
+        {
+          "chars": 3000,
+          "real": 2640,
+          "estimate": 3010,
+          "ratio": 0.8771,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.64
+        }
+      ]
+    },
+    "uuid": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2629.8,
+      "estimate_mean": 3115.4,
+      "ratio_mean": 0.8441,
+      "ratio_max": 0.8505,
+      "baseline_ratio_max": 2.655,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2655,
+          "estimate": 3148,
+          "ratio": 0.8434,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.655
+        },
+        {
+          "chars": 3000,
+          "real": 2600,
+          "estimate": 3085,
+          "ratio": 0.8428,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.6
+        },
+        {
+          "chars": 3000,
+          "real": 2636,
+          "estimate": 3135,
+          "ratio": 0.8408,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.636
+        },
+        {
+          "chars": 3000,
+          "real": 2629,
+          "estimate": 3118,
+          "ratio": 0.8432,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.629
+        },
+        {
+          "chars": 3000,
+          "real": 2629,
+          "estimate": 3091,
+          "ratio": 0.8505,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.629
+        }
+      ]
+    },
+    "base64": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2215.0,
+      "estimate_mean": 2515.4,
+      "ratio_mean": 0.8806,
+      "ratio_max": 0.8945,
+      "baseline_ratio_max": 2.245,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2179,
+          "estimate": 2512,
+          "ratio": 0.8674,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.179
+        },
+        {
+          "chars": 3000,
+          "real": 2245,
+          "estimate": 2525,
+          "ratio": 0.8891,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.245
+        },
+        {
+          "chars": 3000,
+          "real": 2214,
+          "estimate": 2475,
+          "ratio": 0.8945,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.214
+        },
+        {
+          "chars": 3000,
+          "real": 2229,
+          "estimate": 2518,
+          "ratio": 0.8852,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.229
+        },
+        {
+          "chars": 3000,
+          "real": 2208,
+          "estimate": 2547,
+          "ratio": 0.8669,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.208
+        }
+      ]
+    },
+    "base32": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2079.8,
+      "estimate_mean": 2294.4,
+      "ratio_mean": 0.9065,
+      "ratio_max": 0.9191,
+      "baseline_ratio_max": 2.1,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2081,
+          "estimate": 2305,
+          "ratio": 0.9028,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.081
+        },
+        {
+          "chars": 3000,
+          "real": 2059,
+          "estimate": 2283,
+          "ratio": 0.9019,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.059
+        },
+        {
+          "chars": 3000,
+          "real": 2091,
+          "estimate": 2275,
+          "ratio": 0.9191,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.091
+        },
+        {
+          "chars": 3000,
+          "real": 2068,
+          "estimate": 2305,
+          "ratio": 0.8972,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.068
+        },
+        {
+          "chars": 3000,
+          "real": 2100,
+          "estimate": 2304,
+          "ratio": 0.9115,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.1
+        }
+      ]
+    },
+    "dna": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1582.8,
+      "estimate_mean": 2318.8,
+      "ratio_mean": 0.6826,
+      "ratio_max": 0.6909,
+      "baseline_ratio_max": 1.603,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1583,
+          "estimate": 2320,
+          "ratio": 0.6823,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.583
+        },
+        {
+          "chars": 3000,
+          "real": 1566,
+          "estimate": 2320,
+          "ratio": 0.675,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.566
+        },
+        {
+          "chars": 3000,
+          "real": 1603,
+          "estimate": 2320,
+          "ratio": 0.6909,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.603
+        },
+        {
+          "chars": 3000,
+          "real": 1574,
+          "estimate": 2320,
+          "ratio": 0.6784,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.574
+        },
+        {
+          "chars": 3000,
+          "real": 1588,
+          "estimate": 2314,
+          "ratio": 0.6863,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.588
+        }
+      ]
+    },
+    "protein": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1735.8,
+      "estimate_mean": 2320.0,
+      "ratio_mean": 0.7482,
+      "ratio_max": 0.7547,
+      "baseline_ratio_max": 1.751,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1740,
+          "estimate": 2320,
+          "ratio": 0.75,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.74
+        },
+        {
+          "chars": 3000,
+          "real": 1751,
+          "estimate": 2320,
+          "ratio": 0.7547,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.751
+        },
+        {
+          "chars": 3000,
+          "real": 1735,
+          "estimate": 2320,
+          "ratio": 0.7478,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.735
+        },
+        {
+          "chars": 3000,
+          "real": 1720,
+          "estimate": 2320,
+          "ratio": 0.7414,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.72
+        },
+        {
+          "chars": 3000,
+          "real": 1733,
+          "estimate": 2320,
+          "ratio": 0.747,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.733
+        }
+      ]
+    },
+    "random_lowercase": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1612.4,
+      "estimate_mean": 2300.0,
+      "ratio_mean": 0.7011,
+      "ratio_max": 0.7135,
+      "baseline_ratio_max": 1.641,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1596,
+          "estimate": 2300,
+          "ratio": 0.6939,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.596
+        },
+        {
+          "chars": 3000,
+          "real": 1606,
+          "estimate": 2300,
+          "ratio": 0.6983,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.606
+        },
+        {
+          "chars": 3000,
+          "real": 1606,
+          "estimate": 2300,
+          "ratio": 0.6983,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.606
+        },
+        {
+          "chars": 3000,
+          "real": 1641,
+          "estimate": 2300,
+          "ratio": 0.7135,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.641
+        },
+        {
+          "chars": 3000,
+          "real": 1613,
+          "estimate": 2300,
+          "ratio": 0.7013,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.613
+        }
+      ]
+    },
+    "random_uppercase": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1771.0,
+      "estimate_mean": 2300.0,
+      "ratio_mean": 0.77,
+      "ratio_max": 0.7822,
+      "baseline_ratio_max": 1.799,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1761,
+          "estimate": 2300,
+          "ratio": 0.7657,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.761
+        },
+        {
+          "chars": 3000,
+          "real": 1760,
+          "estimate": 2300,
+          "ratio": 0.7652,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.76
+        },
+        {
+          "chars": 3000,
+          "real": 1758,
+          "estimate": 2300,
+          "ratio": 0.7643,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.758
+        },
+        {
+          "chars": 3000,
+          "real": 1799,
+          "estimate": 2300,
+          "ratio": 0.7822,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.799
+        },
+        {
+          "chars": 3000,
+          "real": 1777,
+          "estimate": 2300,
+          "ratio": 0.7726,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.777
+        }
+      ]
+    },
+    "long_words": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 674.4,
+      "estimate_mean": 1505.2,
+      "ratio_mean": 0.4481,
+      "ratio_max": 0.4491,
+      "baseline_ratio_max": 0.679,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 671,
+          "estimate": 1494,
+          "ratio": 0.4491,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.671
+        },
+        {
+          "chars": 3000,
+          "real": 677,
+          "estimate": 1512,
+          "ratio": 0.4478,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.677
+        },
+        {
+          "chars": 3000,
+          "real": 679,
+          "estimate": 1514,
+          "ratio": 0.4485,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.679
+        },
+        {
+          "chars": 3000,
+          "real": 670,
+          "estimate": 1494,
+          "ratio": 0.4485,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.67
+        },
+        {
+          "chars": 3000,
+          "real": 675,
+          "estimate": 1512,
+          "ratio": 0.4464,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.675
+        }
+      ]
+    },
+    "lang_chinese": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1999.0,
+      "estimate_mean": 3209.0,
+      "ratio_mean": 0.6229,
+      "ratio_max": 0.6232,
+      "baseline_ratio_max": 2.0,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1997,
+          "estimate": 3209,
+          "ratio": 0.6223,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.997
+        },
+        {
+          "chars": 3000,
+          "real": 2000,
+          "estimate": 3209,
+          "ratio": 0.6232,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.0
+        },
+        {
+          "chars": 3000,
+          "real": 2000,
+          "estimate": 3209,
+          "ratio": 0.6232,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.0
+        },
+        {
+          "chars": 3000,
+          "real": 2000,
+          "estimate": 3209,
+          "ratio": 0.6232,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.0
+        },
+        {
+          "chars": 3000,
+          "real": 1998,
+          "estimate": 3209,
+          "ratio": 0.6226,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.998
+        }
+      ]
+    },
+    "lang_japanese": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1810.8,
+      "estimate_mean": 3272.2,
+      "ratio_mean": 0.5534,
+      "ratio_max": 0.5535,
+      "baseline_ratio_max": 1.811,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1811,
+          "estimate": 3272,
+          "ratio": 0.5535,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.811
+        },
+        {
+          "chars": 3000,
+          "real": 1811,
+          "estimate": 3272,
+          "ratio": 0.5535,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.811
+        },
+        {
+          "chars": 3000,
+          "real": 1811,
+          "estimate": 3273,
+          "ratio": 0.5533,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.811
+        },
+        {
+          "chars": 3000,
+          "real": 1811,
+          "estimate": 3272,
+          "ratio": 0.5535,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.811
+        },
+        {
+          "chars": 3000,
+          "real": 1810,
+          "estimate": 3272,
+          "ratio": 0.5532,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.81
+        }
+      ]
+    },
+    "lang_korean": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1801.6,
+      "estimate_mean": 2708.0,
+      "ratio_mean": 0.6653,
+      "ratio_max": 0.6662,
+      "baseline_ratio_max": 1.804,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1802,
+          "estimate": 2708,
+          "ratio": 0.6654,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.802
+        },
+        {
+          "chars": 3000,
+          "real": 1804,
+          "estimate": 2708,
+          "ratio": 0.6662,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.804
+        },
+        {
+          "chars": 3000,
+          "real": 1802,
+          "estimate": 2708,
+          "ratio": 0.6654,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.802
+        },
+        {
+          "chars": 3000,
+          "real": 1800,
+          "estimate": 2708,
+          "ratio": 0.6647,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.8
+        },
+        {
+          "chars": 3000,
+          "real": 1800,
+          "estimate": 2708,
+          "ratio": 0.6647,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.8
+        }
+      ]
+    },
+    "lang_russian": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 974.4,
+      "estimate_mean": 2936.0,
+      "ratio_mean": 0.3319,
+      "ratio_max": 0.3328,
+      "baseline_ratio_max": 0.977,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 977,
+          "estimate": 2936,
+          "ratio": 0.3328,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.977
+        },
+        {
+          "chars": 3000,
+          "real": 974,
+          "estimate": 2936,
+          "ratio": 0.3317,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.974
+        },
+        {
+          "chars": 3000,
+          "real": 975,
+          "estimate": 2936,
+          "ratio": 0.3321,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.975
+        },
+        {
+          "chars": 3000,
+          "real": 974,
+          "estimate": 2936,
+          "ratio": 0.3317,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.974
+        },
+        {
+          "chars": 3000,
+          "real": 972,
+          "estimate": 2936,
+          "ratio": 0.3311,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 0.972
+        }
+      ]
+    },
+    "lang_hindi": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2969.6,
+      "estimate_mean": 5529.2,
+      "ratio_mean": 0.5371,
+      "ratio_max": 0.5372,
+      "baseline_ratio_max": 2.97,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2970,
+          "estimate": 5529,
+          "ratio": 0.5372,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.97
+        },
+        {
+          "chars": 3000,
+          "real": 2969,
+          "estimate": 5529,
+          "ratio": 0.537,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.969
+        },
+        {
+          "chars": 3000,
+          "real": 2970,
+          "estimate": 5529,
+          "ratio": 0.5372,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.97
+        },
+        {
+          "chars": 3000,
+          "real": 2969,
+          "estimate": 5529,
+          "ratio": 0.537,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.969
+        },
+        {
+          "chars": 3000,
+          "real": 2970,
+          "estimate": 5530,
+          "ratio": 0.5371,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.97
+        }
+      ]
+    },
+    "lang_georgian": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 3000.0,
+      "estimate_mean": 5763.2,
+      "ratio_mean": 0.5206,
+      "ratio_max": 0.5207,
+      "baseline_ratio_max": 3.0,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 5764,
+          "ratio": 0.5205,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 5764,
+          "ratio": 0.5205,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 5764,
+          "ratio": 0.5205,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 5762,
+          "ratio": 0.5207,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        },
+        {
+          "chars": 3000,
+          "real": 3000,
+          "estimate": 5762,
+          "ratio": 0.5207,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.0
+        }
+      ]
+    },
+    "lang_thai": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1575.8,
+      "estimate_mean": 6556.8,
+      "ratio_mean": 0.2403,
+      "ratio_max": 0.2405,
+      "baseline_ratio_max": 1.577,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1574,
+          "estimate": 6555,
+          "ratio": 0.2401,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.574
+        },
+        {
+          "chars": 3000,
+          "real": 1576,
+          "estimate": 6555,
+          "ratio": 0.2404,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.576
+        },
+        {
+          "chars": 3000,
+          "real": 1577,
+          "estimate": 6558,
+          "ratio": 0.2405,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.577
+        },
+        {
+          "chars": 3000,
+          "real": 1576,
+          "estimate": 6558,
+          "ratio": 0.2403,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.576
+        },
+        {
+          "chars": 3000,
+          "real": 1576,
+          "estimate": 6558,
+          "ratio": 0.2403,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.576
+        }
+      ]
+    },
+    "lang_amharic": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 3987.8,
+      "estimate_mean": 5302.0,
+      "ratio_mean": 0.7521,
+      "ratio_max": 0.7526,
+      "baseline_ratio_max": 3.989,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 3989,
+          "estimate": 5300,
+          "ratio": 0.7526,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.989
+        },
+        {
+          "chars": 3000,
+          "real": 3986,
+          "estimate": 5302,
+          "ratio": 0.7518,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.986
+        },
+        {
+          "chars": 3000,
+          "real": 3987,
+          "estimate": 5304,
+          "ratio": 0.7517,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.987
+        },
+        {
+          "chars": 3000,
+          "real": 3989,
+          "estimate": 5300,
+          "ratio": 0.7526,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.989
+        },
+        {
+          "chars": 3000,
+          "real": 3988,
+          "estimate": 5304,
+          "ratio": 0.7519,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.988
+        }
+      ]
+    },
+    "lang_hebrew": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1222.6,
+      "estimate_mean": 2809.0,
+      "ratio_mean": 0.4353,
+      "ratio_max": 0.4354,
+      "baseline_ratio_max": 1.223,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1223,
+          "estimate": 2809,
+          "ratio": 0.4354,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.223
+        },
+        {
+          "chars": 3000,
+          "real": 1221,
+          "estimate": 2809,
+          "ratio": 0.4347,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.221
+        },
+        {
+          "chars": 3000,
+          "real": 1223,
+          "estimate": 2809,
+          "ratio": 0.4354,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.223
+        },
+        {
+          "chars": 3000,
+          "real": 1223,
+          "estimate": 2809,
+          "ratio": 0.4354,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.223
+        },
+        {
+          "chars": 3000,
+          "real": 1223,
+          "estimate": 2809,
+          "ratio": 0.4354,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.223
+        }
+      ]
+    },
+    "lang_arabic": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1093.8,
+      "estimate_mean": 2923.6,
+      "ratio_mean": 0.3741,
+      "ratio_max": 0.3743,
+      "baseline_ratio_max": 1.094,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1094,
+          "estimate": 2924,
+          "ratio": 0.3741,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.094
+        },
+        {
+          "chars": 3000,
+          "real": 1094,
+          "estimate": 2924,
+          "ratio": 0.3741,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.094
+        },
+        {
+          "chars": 3000,
+          "real": 1094,
+          "estimate": 2923,
+          "ratio": 0.3743,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.094
+        },
+        {
+          "chars": 3000,
+          "real": 1094,
+          "estimate": 2924,
+          "ratio": 0.3741,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.094
+        },
+        {
+          "chars": 3000,
+          "real": 1093,
+          "estimate": 2923,
+          "ratio": 0.3739,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.093
+        }
+      ]
+    },
+    "math_symbols": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 2534.8,
+      "estimate_mean": 4374.8,
+      "ratio_mean": 0.5794,
+      "ratio_max": 0.5796,
+      "baseline_ratio_max": 2.537,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 2534,
+          "estimate": 4374,
+          "ratio": 0.5793,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.534
+        },
+        {
+          "chars": 3000,
+          "real": 2535,
+          "estimate": 4375,
+          "ratio": 0.5794,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.535
+        },
+        {
+          "chars": 3000,
+          "real": 2537,
+          "estimate": 4381,
+          "ratio": 0.5791,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.537
+        },
+        {
+          "chars": 3000,
+          "real": 2534,
+          "estimate": 4372,
+          "ratio": 0.5796,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.534
+        },
+        {
+          "chars": 3000,
+          "real": 2534,
+          "estimate": 4372,
+          "ratio": 0.5796,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 2.534
+        }
+      ]
+    },
+    "braille_spinners": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 3105.0,
+      "estimate_mean": 4999.0,
+      "ratio_mean": 0.6211,
+      "ratio_max": 0.6213,
+      "baseline_ratio_max": 3.11,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 3109,
+          "estimate": 5006,
+          "ratio": 0.6211,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.109
+        },
+        {
+          "chars": 3000,
+          "real": 3099,
+          "estimate": 4990,
+          "ratio": 0.621,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.099
+        },
+        {
+          "chars": 3000,
+          "real": 3110,
+          "estimate": 5006,
+          "ratio": 0.6213,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.11
+        },
+        {
+          "chars": 3000,
+          "real": 3097,
+          "estimate": 4987,
+          "ratio": 0.621,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.097
+        },
+        {
+          "chars": 3000,
+          "real": 3110,
+          "estimate": 5006,
+          "ratio": 0.6213,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 3.11
+        }
+      ]
+    },
+    "emoji": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1183.8,
+      "estimate_mean": 2334.8,
+      "ratio_mean": 0.507,
+      "ratio_max": 0.5073,
+      "baseline_ratio_max": 1.185,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1185,
+          "estimate": 2336,
+          "ratio": 0.5073,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.185
+        },
+        {
+          "chars": 3000,
+          "real": 1184,
+          "estimate": 2335,
+          "ratio": 0.5071,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.184
+        },
+        {
+          "chars": 3000,
+          "real": 1184,
+          "estimate": 2335,
+          "ratio": 0.5071,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.184
+        },
+        {
+          "chars": 3000,
+          "real": 1185,
+          "estimate": 2336,
+          "ratio": 0.5073,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.185
+        },
+        {
+          "chars": 3000,
+          "real": 1181,
+          "estimate": 2332,
+          "ratio": 0.5064,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.181
+        }
+      ]
+    },
+    "box_drawing": {
+      "samples": 5,
+      "chars": 3000,
+      "real_tokens_mean": 1406.4,
+      "estimate_mean": 8090.6,
+      "ratio_mean": 0.1738,
+      "ratio_max": 0.1739,
+      "baseline_ratio_max": 1.407,
+      "per_sample": [
+        {
+          "chars": 3000,
+          "real": 1406,
+          "estimate": 8083,
+          "ratio": 0.1739,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.406
+        },
+        {
+          "chars": 3000,
+          "real": 1406,
+          "estimate": 8083,
+          "ratio": 0.1739,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.406
+        },
+        {
+          "chars": 3000,
+          "real": 1407,
+          "estimate": 8102,
+          "ratio": 0.1737,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.407
+        },
+        {
+          "chars": 3000,
+          "real": 1406,
+          "estimate": 8083,
+          "ratio": 0.1739,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.406
+        },
+        {
+          "chars": 3000,
+          "real": 1407,
+          "estimate": 8102,
+          "ratio": 0.1737,
+          "baseline_chars_div_3": 1000,
+          "baseline_ratio": 1.407
+        }
+      ]
+    }
+  }
+}

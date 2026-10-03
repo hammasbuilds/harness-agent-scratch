@@ -219,3 +219,21 @@ def test_size_flags_reject_nonsense(value, capsys):
         cli.parse_args(["--max-steps", value])
     assert done.value.code == 2
     assert "--max-steps" in capsys.readouterr().err
+
+
+def test_printer_shows_one_line_of_each_subagent_result():
+    out = io.StringIO()
+    p = cli.Printer(out)
+    p("subagent_tool_result", ("read_file", "line one\nline two\nline three"))
+    p("subagent_tool_result", ("bash", "error: subagents may only run read-only commands"))
+    text = out.getvalue()
+    assert "  [subagent]   line one ... (28 chars)" in text and "line two" not in text
+    assert "[subagent]   error: subagents may only run read-only commands\n" in text
+
+
+def test_printer_follows_a_replaced_stdout(monkeypatch):
+    # Its default stream is looked up when it is made, not when cli was imported.
+    replaced = io.StringIO()
+    monkeypatch.setattr("sys.stdout", replaced)
+    cli.Printer()("assistant_text", "hello")
+    assert replaced.getvalue() == "hello\n"

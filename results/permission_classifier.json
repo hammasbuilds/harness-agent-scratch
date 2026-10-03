@@ -1,0 +1,220 @@
+{
+  "what": "decisions of harness.permissions.classify (allow = runs without asking)",
+  "swesmith_agent_commands": {
+    "source": "SWE-bench/SWE-smith-trajectories, ticks split, file ticks-00001-of-00008, row group 3 (229 trajectories, 2,986 shell commands, 1,453 distinct)",
+    "n": 299,
+    "labels": {
+      "read": 204,
+      "change": 95
+    },
+    "excluded_not_a_command": 1,
+    "decisions": {
+      "allow": {
+        "k": 176,
+        "n": 299,
+        "rate": 0.5886,
+        "ci95": [
+          0.5321,
+          0.6429
+        ]
+      },
+      "ask": {
+        "k": 123,
+        "n": 299,
+        "rate": 0.4114,
+        "ci95": [
+          0.3571,
+          0.4679
+        ]
+      },
+      "deny": {
+        "k": 0,
+        "n": 299,
+        "rate": 0.0,
+        "ci95": [
+          0.0,
+          0.0127
+        ]
+      }
+    },
+    "allow_share_weighted_by_times_issued": 0.2811,
+    "vs_labels": {
+      "allow_precision": {
+        "k": 176,
+        "n": 176,
+        "rate": 1.0,
+        "ci95": [
+          0.9786,
+          1.0
+        ]
+      },
+      "allow_recall": {
+        "k": 176,
+        "n": 204,
+        "rate": 0.8627,
+        "ci95": [
+          0.8088,
+          0.9033
+        ]
+      },
+      "unsafe_allows": 0
+    },
+    "asked_reads": 28,
+    "asked_reads_first_word_off_the_allowlist": {
+      "xargs": 11,
+      "cd": 8,
+      "sort": 6,
+      "{": 3
+    },
+    "what_if_cd_to_workspace_root_were_allowed": {
+      "allow_precision": {
+        "k": 183,
+        "n": 183,
+        "rate": 1.0,
+        "ci95": [
+          0.9794,
+          1.0
+        ]
+      },
+      "allow_recall": {
+        "k": 183,
+        "n": 204,
+        "rate": 0.8971,
+        "ci95": [
+          0.8478,
+          0.9317
+        ]
+      },
+      "unsafe_allows": 0
+    }
+  },
+  "terminal_agent_labelled_commands": {
+    "source": "hammasbuilds/terminal-agent data/risky_commands*.jsonl (four splits, labelled for that project's policy)",
+    "n": 826,
+    "labels": {
+      "dangerous": 514,
+      "neutral": 110,
+      "safe": 202
+    },
+    "by_label": {
+      "dangerous": {
+        "allow": {
+          "k": 0,
+          "n": 514,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.0074
+          ]
+        },
+        "ask": {
+          "k": 481,
+          "n": 514,
+          "rate": 0.9358,
+          "ci95": [
+            0.9112,
+            0.9539
+          ]
+        },
+        "deny": {
+          "k": 33,
+          "n": 514,
+          "rate": 0.0642,
+          "ci95": [
+            0.0461,
+            0.0888
+          ]
+        }
+      },
+      "neutral": {
+        "allow": {
+          "k": 1,
+          "n": 110,
+          "rate": 0.0091,
+          "ci95": [
+            0.0016,
+            0.0497
+          ]
+        },
+        "ask": {
+          "k": 109,
+          "n": 110,
+          "rate": 0.9909,
+          "ci95": [
+            0.9503,
+            0.9984
+          ]
+        },
+        "deny": {
+          "k": 0,
+          "n": 110,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.0337
+          ]
+        }
+      },
+      "safe": {
+        "allow": {
+          "k": 89,
+          "n": 202,
+          "rate": 0.4406,
+          "ci95": [
+            0.3739,
+            0.5095
+          ]
+        },
+        "ask": {
+          "k": 112,
+          "n": 202,
+          "rate": 0.5545,
+          "ci95": [
+            0.4855,
+            0.6213
+          ]
+        },
+        "deny": {
+          "k": 1,
+          "n": 202,
+          "rate": 0.005,
+          "ci95": [
+            0.0009,
+            0.0275
+          ]
+        }
+      }
+    },
+    "dangerous_allowed": [],
+    "safe_allowed_by_category": {
+      "inspect": 55,
+      "read": 23,
+      "git-read": 5,
+      "search": 5,
+      "echo": 1
+    }
+  },
+  "review_bypass_regressions": {
+    "note": "commands pinned by tests/test_permissions.py; zero allowed is by construction",
+    "n": 172,
+    "allowed": {
+      "k": 0,
+      "n": 172,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.0218
+      ]
+    },
+    "allowed_commands": [],
+    "expected_deny_denied": {
+      "k": 10,
+      "n": 10,
+      "rate": 1.0,
+      "ci95": [
+        0.7225,
+        1.0
+      ]
+    }
+  }
+}

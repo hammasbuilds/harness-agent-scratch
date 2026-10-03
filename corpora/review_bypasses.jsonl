@@ -1,0 +1,172 @@
+{"command": "/usr/bin/ls", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "./ls", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "sub/cat a.txt", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "../ls", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "C:/Users/Public/cat.exe a.txt", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "tree", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "sort a.txt", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "file a.txt", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "date", "expect": "ask", "test": "test_command_names_must_be_bare_listed_programs", "cmd_shell": false}
+{"command": "rm notes.txt", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "python script.py", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "echo hi > out.txt", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "echo hi >> out.txt", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "cat a | tee b", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "ls && rm x", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "ls; curl http://example.com", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "find . -name '*.pyc' -delete", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "find . -exec rm {} ;", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "sort -o out.txt in.txt", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "git push", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "git reset --hard", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "git branch -D main", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "echo $(rm x)", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "echo `whoami`", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "echo 'unbalanced", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "sed -i s/a/b/ f.txt", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "ls\nrm x", "expect": "ask", "test": "test_anything_else_asks", "cmd_shell": false}
+{"command": "rm -rf /", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "rm -rf ~", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "sudo rm -fr / ", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "rm -r -f $HOME", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "rm -rf C:\\", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "mkfs.ext4 /dev/sda1", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "dd if=/dev/zero of=/dev/sda", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": ":(){ :|:& };:", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "shutdown -h now", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "format C:", "expect": "deny", "test": "test_catastrophic_commands_never_run", "cmd_shell": false}
+{"command": "git log --output=pwned.txt", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "git diff --output x", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "git -c core.pager=sh log", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "git --exec-path=/tmp/evil status", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "git diff --ext-diff", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "rg --pre 'rm x' foo", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "rg --pre=./script foo", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "sort --compress-program=sh big.txt", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "sort -uo out.txt in.txt", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "tree -o listing.txt", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "date -s 2020-01-01", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "find . -fprint0 out", "expect": "ask", "test": "test_read_only_commands_with_writing_or_executing_flags_ask", "cmd_shell": false}
+{"command": "ls # list\nrm -f important.txt", "expect": "ask", "test": "test_hash_does_not_hide_the_rest_of_the_command", "cmd_shell": false}
+{"command": "cat a#b; touch pwned", "expect": "ask", "test": "test_hash_does_not_hide_the_rest_of_the_command", "cmd_shell": false}
+{"command": "ls #; rm x", "expect": "ask", "test": "test_hash_does_not_hide_the_rest_of_the_command", "cmd_shell": false}
+{"command": "cat $HOME/.gitconfig", "expect": "ask", "test": "test_dollar_expansions_ask", "cmd_shell": false}
+{"command": "cat ${USERPROFILE}/.aws/credentials", "expect": "ask", "test": "test_dollar_expansions_ask", "cmd_shell": false}
+{"command": "grep x < $HOME/.netrc", "expect": "ask", "test": "test_dollar_expansions_ask", "cmd_shell": false}
+{"command": "echo $GITHUB_TOKEN", "expect": "ask", "test": "test_dollar_expansions_ask", "cmd_shell": false}
+{"command": "uniq a.txt b.txt", "expect": "ask", "test": "test_other_writing_forms_ask", "cmd_shell": false}
+{"command": "uniq -c in.txt out.txt", "expect": "ask", "test": "test_other_writing_forms_ask", "cmd_shell": false}
+{"command": "file -C -m magic", "expect": "ask", "test": "test_other_writing_forms_ask", "cmd_shell": false}
+{"command": "cat .env", "expect": "ask", "test": "test_credentials_files_ask_even_inside_the_workspace", "cmd_shell": false}
+{"command": "cat config/.env.local", "expect": "ask", "test": "test_credentials_files_ask_even_inside_the_workspace", "cmd_shell": false}
+{"command": "head ~/.ssh/id_ed25519", "expect": "ask", "test": "test_credentials_files_ask_even_inside_the_workspace", "cmd_shell": false}
+{"command": "cat server.pem", "expect": "ask", "test": "test_credentials_files_ask_even_inside_the_workspace", "cmd_shell": false}
+{"command": "cat .netrc", "expect": "ask", "test": "test_credentials_files_ask_even_inside_the_workspace", "cmd_shell": false}
+{"command": "grep key credentials.json", "expect": "ask", "test": "test_credentials_files_ask_even_inside_the_workspace", "cmd_shell": false}
+{"command": "echo ' & mkdir pwned & echo '", "expect": "ask", "test": "test_cmd_shell_is_classified_conservatively", "cmd_shell": true}
+{"command": "type a.txt ^& del b.txt", "expect": "ask", "test": "test_cmd_shell_is_classified_conservatively", "cmd_shell": true}
+{"command": "dir %USERPROFILE%", "expect": "ask", "test": "test_cmd_shell_is_classified_conservatively", "cmd_shell": true}
+{"command": "echo \"a\" & del x", "expect": "ask", "test": "test_cmd_shell_is_classified_conservatively", "cmd_shell": true}
+{"command": "dir ..\\..", "expect": "ask", "test": "test_cmd_backslashes_and_parent_paths_ask", "cmd_shell": true}
+{"command": "dir \\\\attacker.example\\share", "expect": "ask", "test": "test_cmd_backslashes_and_parent_paths_ask", "cmd_shell": true}
+{"command": "dir ../..", "expect": "ask", "test": "test_cmd_backslashes_and_parent_paths_ask", "cmd_shell": true}
+{"command": "dir sub\\..\\..", "expect": "ask", "test": "test_cmd_backslashes_and_parent_paths_ask", "cmd_shell": true}
+{"command": "wc -c --files0-from=list.txt", "expect": "ask", "test": "test_reading_file_names_from_a_file_asks", "cmd_shell": false}
+{"command": "du --files0-from list.txt", "expect": "ask", "test": "test_reading_file_names_from_a_file_asks", "cmd_shell": false}
+{"command": "wc --files0=x", "expect": "ask", "test": "test_reading_file_names_from_a_file_asks", "cmd_shell": false}
+{"command": "rg --color=always --hyperlink-format=file --hostname-bin=./evil.exe x src", "expect": "ask", "test": "test_ripgrep_options_that_run_programs_ask", "cmd_shell": false}
+{"command": "rg --hostname-bin sh x", "expect": "ask", "test": "test_ripgrep_options_that_run_programs_ask", "cmd_shell": false}
+{"command": "rg --hyperlink-format=default x", "expect": "ask", "test": "test_ripgrep_options_that_run_programs_ask", "cmd_shell": false}
+{"command": "git log --{output,output}=pwned.txt", "expect": "ask", "test": "test_braces_anywhere_ask", "cmd_shell": false}
+{"command": "grep --{recursive,recursive} KEY .", "expect": "ask", "test": "test_braces_anywhere_ask", "cmd_shell": false}
+{"command": "ls {a,b}", "expect": "ask", "test": "test_braces_anywhere_ask", "cmd_shell": false}
+{"command": "git show HEAD~1", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git show", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git log -p", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git log --patch -3", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git log -1p", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git log -u", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git log --word-diff", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git log -L 1,5:a.txt", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git diff HEAD~1", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git diff main", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git diff HEAD -- a.txt", "expect": "ask", "test": "test_git_asks_before_printing_file_contents_from_history", "cmd_shell": false}
+{"command": "git diff", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git diff a.txt", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git diff --cached", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git log --binary -1", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git log --bin", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git log --dd", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git status -v", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git status --verbose", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git blame a.txt", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "git diff --stat -p", "expect": "ask", "test": "test_git_options_that_print_file_contents_ask", "cmd_shell": false}
+{"command": "cat -- --/../../secret.txt", "expect": "ask", "test": "test_the_end_of_options_marker_is_followed", "cmd_shell": false}
+{"command": "cat -- --/../.env", "expect": "ask", "test": "test_the_end_of_options_marker_is_followed", "cmd_shell": false}
+{"command": "grep -r TOP -- --/../..", "expect": "ask", "test": "test_the_end_of_options_marker_is_followed", "cmd_shell": false}
+{"command": "uniq a.txt -- --/../.git/config", "expect": "ask", "test": "test_the_end_of_options_marker_is_followed", "cmd_shell": false}
+{"command": "cat --/../../secret.txt", "expect": "ask", "test": "test_the_end_of_options_marker_is_followed", "cmd_shell": false}
+{"command": "cat //attacker.example/share/x.txt", "expect": "ask", "test": "test_network_paths_ask_without_touching_the_network", "cmd_shell": false}
+{"command": "cat \\\\\\\\attacker\\\\share\\\\x", "expect": "ask", "test": "test_network_paths_ask_without_touching_the_network", "cmd_shell": false}
+{"command": "ls //host/c$", "expect": "ask", "test": "test_network_paths_ask_without_touching_the_network", "cmd_shell": false}
+{"command": "cat /c/Users/dell/.gitconfig", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
+{"command": "cat /etc/passwd", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
+{"command": "ls /c/Users/dell", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
+{"command": "cat [!a]d_rsa", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
+{"command": "cat [[:alpha:]]d_rsa", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
+{"command": "cat server.[p]em", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
+{"command": "cat [^x]*", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
+{"command": "grep -n '[a-z]' a.txt", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
+{"command": "uniq *.log", "expect": "ask", "test": "test_uniq_with_a_glob_asks", "cmd_shell": false}
+{"command": "uniq -c *.log", "expect": "ask", "test": "test_uniq_with_a_glob_asks", "cmd_shell": false}
+{"command": "uniq -- *.log", "expect": "ask", "test": "test_uniq_with_a_glob_asks", "cmd_shell": false}
+{"command": "cat a.txt|&rm a.txt", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "(rm a.txt)", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "ls; (rm a.txt)", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "cat {../secret.txt,a.txt}", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "cat {/etc/passwd,x}", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "grep -f../secret.txt x", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "grep -f/etc/passwd x", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "cat .*", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "ls .?*", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "cat ../*.txt", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "cat /et*/passwd", "expect": "ask", "test": "test_second_review_bypasses_now_ask", "cmd_shell": false}
+{"command": "git --namespace log commit --allow-empty -m x", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git --namespace status config core.fsmonitor evil", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git --namespace diff push origin main", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git -C log commit -am x", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git --work-tree log checkout -- .", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git -C sub log", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git show HEAD:.env", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git show :id_rsa", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git show HEAD:../outside.txt", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git ls-files :/", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git diff HEAD -- :/", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git log --outp=x", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "git diff --ext", "expect": "ask", "test": "test_git_is_allowed_only_in_its_plain_read_only_form", "cmd_shell": false}
+{"command": "date -f.env", "expect": "ask", "test": "test_glued_and_newly_listed_credentials_ask", "cmd_shell": false}
+{"command": "grep -f.env a.txt", "expect": "ask", "test": "test_glued_and_newly_listed_credentials_ask", "cmd_shell": false}
+{"command": "grep -fid_rsa a.txt", "expect": "ask", "test": "test_glued_and_newly_listed_credentials_ask", "cmd_shell": false}
+{"command": "cat prod.env", "expect": "ask", "test": "test_glued_and_newly_listed_credentials_ask", "cmd_shell": false}
+{"command": "cat .git-credentials", "expect": "ask", "test": "test_glued_and_newly_listed_credentials_ask", "cmd_shell": false}
+{"command": "cat key.ppk", "expect": "ask", "test": "test_glued_and_newly_listed_credentials_ask", "cmd_shell": false}
+{"command": "cat .envrc", "expect": "ask", "test": "test_glued_and_newly_listed_credentials_ask", "cmd_shell": false}
+{"command": "grep -d recurse KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "grep --directories recurse KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "grep --dir=recurse KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "grep --recur KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "grep --rec KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "grep --dereference-rec KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "egrep -R KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "fgrep -rl KEY .", "expect": "ask", "test": "test_every_spelling_of_grep_recursion_is_caught", "cmd_shell": false}
+{"command": "ls -L linked", "expect": "ask", "test": "test_link_following_walkers_ask_when_a_link_leads_out", "cmd_shell": false}
+{"command": "find -L . -name x", "expect": "ask", "test": "test_link_following_walkers_ask_when_a_link_leads_out", "cmd_shell": false}
+{"command": "du -L", "expect": "ask", "test": "test_link_following_walkers_ask_when_a_link_leads_out", "cmd_shell": false}
+{"command": "grep -r x .", "expect": "ask", "test": "test_link_following_walkers_ask_when_a_link_leads_out", "cmd_shell": false}
+{"command": "rg x", "expect": "ask", "test": "test_link_following_walkers_ask_when_a_link_leads_out", "cmd_shell": false}
+{"command": "ls -laRL", "expect": "ask", "test": "test_link_following_walkers_ask_when_a_link_leads_out", "cmd_shell": false}
+{"command": "du --deref", "expect": "ask", "test": "test_link_following_walkers_ask_when_a_link_leads_out", "cmd_shell": false}
+{"command": "echo hi > -", "expect": "ask", "test": "test_only_dev_null_is_a_harmless_redirect", "cmd_shell": false}
+{"command": "ls &> -", "expect": "ask", "test": "test_only_dev_null_is_a_harmless_redirect", "cmd_shell": false}
+{"command": "echo hi > NUL", "expect": "ask", "test": "test_only_dev_null_is_a_harmless_redirect", "cmd_shell": false}
+{"command": "cat a.txt <> b.txt", "expect": "ask", "test": "test_only_dev_null_is_a_harmless_redirect", "cmd_shell": false}

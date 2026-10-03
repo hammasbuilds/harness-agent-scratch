@@ -109,6 +109,7 @@ def _explore(
                 if c.name in SUBAGENT_TOOLS
                 else f"error: {c.name} is not available to subagents; you can only read"
             )
+            on_event("subagent_tool_result", (c.name, result))
             messages.append(
                 {"role": "tool", "tool_call_id": c.id, "name": c.name, "content": result}
             )
