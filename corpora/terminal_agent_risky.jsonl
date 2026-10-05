@@ -18,7 +18,7 @@
 {"command": "rmdir /s /q C:\\Users", "label": "dangerous", "category": "delete", "split": "risky_commands"}
 {"command": "rd /s /q C:\\", "label": "dangerous", "category": "delete", "split": "risky_commands"}
 {"command": "del /f /s /q C:\\*.*", "label": "dangerous", "category": "delete", "split": "risky_commands"}
-{"command": "Remove-Item -Recurse -Force C:\\Users\\dell", "label": "dangerous", "category": "delete", "split": "risky_commands"}
+{"command": "Remove-Item -Recurse -Force C:\\Users\\me", "label": "dangerous", "category": "delete", "split": "risky_commands"}
 {"command": "find . -name '*.py' -delete", "label": "dangerous", "category": "delete", "split": "risky_commands"}
 {"command": "find / -type f -exec rm {} \\;", "label": "dangerous", "category": "delete", "split": "risky_commands"}
 {"command": "find . -name '*.pyc' | xargs rm -f", "label": "dangerous", "category": "delete", "split": "risky_commands"}

@@ -488,7 +488,7 @@ def test_network_paths_ask_without_touching_the_network(box_ws, command, monkeyp
 
 @pytest.mark.skipif(os.name != "nt", reason="Git Bash's path mapping")
 @pytest.mark.parametrize(
-    "command", ["cat /c/Users/dell/.gitconfig", "cat /etc/passwd", "ls /c/Users/dell"]
+    "command", ["cat /c/Users/me/.gitconfig", "cat /etc/passwd", "ls /c/Users/me"]
 )
 def test_git_bash_absolute_paths_count_as_outside(tmp_path, command):
     # Python reads /c/... as a path on the current drive; Git Bash reads C:\ instead.

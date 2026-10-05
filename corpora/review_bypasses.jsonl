@@ -109,9 +109,9 @@
 {"command": "cat //attacker.example/share/x.txt", "expect": "ask", "test": "test_network_paths_ask_without_touching_the_network", "cmd_shell": false}
 {"command": "cat \\\\\\\\attacker\\\\share\\\\x", "expect": "ask", "test": "test_network_paths_ask_without_touching_the_network", "cmd_shell": false}
 {"command": "ls //host/c$", "expect": "ask", "test": "test_network_paths_ask_without_touching_the_network", "cmd_shell": false}
-{"command": "cat /c/Users/dell/.gitconfig", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
+{"command": "cat /c/Users/me/.gitconfig", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
 {"command": "cat /etc/passwd", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
-{"command": "ls /c/Users/dell", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
+{"command": "ls /c/Users/me", "expect": "ask", "test": "test_git_bash_absolute_paths_count_as_outside", "cmd_shell": false}
 {"command": "cat [!a]d_rsa", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
 {"command": "cat [[:alpha:]]d_rsa", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
 {"command": "cat server.[p]em", "expect": "ask", "test": "test_bracket_patterns_always_ask", "cmd_shell": false}
